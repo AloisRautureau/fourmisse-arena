@@ -1,48 +1,65 @@
+use std::fmt::{Debug};
+use std::rc::Rc;
 use rand::Rng;
 use crate::simulation::instruction::{SenseDirection, TurnDirection};
+use crate::simulation::map::AntRef;
 use super::instruction::{InstructionSet, Instruction, Instruction::*};
 use super::map::Map;
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-pub enum Color {
+pub enum Colour {
     Red,
     Black
 }
-impl Default for Color {
+impl Colour {
+    pub fn opposite(&self) -> Self {
+        match self {
+            Self::Red => Self::Black,
+            _ => Self::Red
+        }
+    }
+    pub fn as_index(&self) -> usize {
+        match self {
+            Self::Red => 0,
+            _ => 1
+        }
+    }
+}
+impl Default for Colour {
     fn default() -> Self { Self::Red }
 }
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum CardinalDirection {
-    North,
-    South,
+    West,
+    East,
     NorthWest,
     NorthEast,
     SouthWest,
     SouthEast
 }
 impl Default for CardinalDirection {
-    fn default() -> Self { Self::North }
+    fn default() -> Self { Self::East }
 }
 impl CardinalDirection {
-    pub fn next(self) -> Self {
+    pub fn right(self) -> Self {
         match self {
-            Self::North => Self::NorthEast,
-            Self::NorthEast => Self::SouthEast,
-            Self::SouthEast => Self::South,
-            Self::South => Self::SouthWest,
-            Self::SouthWest => Self::NorthWest,
-            Self::NorthWest => Self::North
+            Self::West => Self::NorthWest,
+            Self::NorthWest => Self::NorthEast,
+            Self::NorthEast => Self::East,
+            Self::East => Self::SouthEast,
+            Self::SouthEast => Self::SouthWest,
+            Self::SouthWest => Self::West
         }
     }
 
-    pub fn previous(self) -> Self {
+    pub fn left(self) -> Self {
         match self {
-            Self::North => Self::NorthWest,
-            Self::NorthEast => Self::North,
-            Self::SouthEast => Self::NorthEast,
-            Self::South => Self::SouthEast,
-            Self::SouthWest => Self::South,
-            Self::NorthWest => Self::SouthWest
+            Self::West => Self::SouthWest,
+            Self::SouthWest => Self::SouthEast,
+            Self::SouthEast => Self::East,
+            Self::East => Self::NorthEast,
+            Self::NorthEast => Self::NorthWest,
+            Self::NorthWest => Self::West
         }
     }
 }
@@ -50,136 +67,135 @@ impl CardinalDirection {
 // Completely represents one ant
 #[derive(Debug)]
 pub struct Ant {
-    pub color: Color,
+    pub id: usize,
+    pub colour: Colour,
     pub position: (usize, usize),
+    pub has_food: bool,
+
     current_instruction: usize,
     cooldown: usize,
-    direction: CardinalDirection,
-
-    has_food: bool
+    direction: CardinalDirection
 }
 impl Ant {
-    // Créé une nouvelle fourmi de la couleur et à la position souhaitée
-    pub fn new(color: Color, position: (usize, usize)) -> Self {
-        println!("created a new ant, yay!");
+    // Creates a new ant of the given colour
+    pub fn new(id: usize, colour: Colour, position: (usize, usize)) -> Self {
         Self {
-            color,
+            id,
+            colour,
             position,
+            has_food: false,
+
             current_instruction: 0,
             cooldown: 0,
             direction: CardinalDirection::default(),
-            has_food: false
         }
     }
 
-    // Fait avancer la fourmi d'un tick
-    // Elle exécute son instruction actuelle, modifie son compteur d'instruction,
-    // décremente son compteur de repos
-    pub fn process_tick(&mut self, map: &mut Map, instructions: &InstructionSet) {
-        // Exécute l'instruction courante si on est hors cooldown
-        if self.cooldown == 0 {
-            let goto_instruction = self.exec(instructions[self.current_instruction], map);
-
-            // Modifie son compteur en accord avec l'instruction précedente
-            if let Some(instruction) = goto_instruction {
-                self.current_instruction = instruction;
-            } else {
-                self.current_instruction += 1;
-            }
+    // Processes one tick, executing a command if the ant is off cooldown, and
+    // reducing said cooldown by 1
+    pub fn process_tick(ant: AntRef, map: &mut Map, instructions: &InstructionSet) {
+        if (*ant).borrow().cooldown == 0 {
+            let current_instruction = instructions.get((*ant).borrow().current_instruction)
+                .expect("Instruction count is out of bounds");
+            Self::exec(Rc::clone(&ant), current_instruction, map);
+        } else {
+            (*ant).borrow_mut().cooldown -= 1
         }
-        // Décrémente son compteur de repos
-        self.cooldown -= 1;
     }
 
-    // Exécute une instruction donnée selon l'état de la fourmi et de la carte
-    // Renvoie un numéro d'instruction en cas de jump
-    fn exec(&mut self, instruction: Instruction, map: &mut Map) -> Option<usize> {
-        match instruction {
+    // Executes a given instruction, ant's state and map
+    // The instruction can change the ant's state
+    // Returns the index of the next instruction
+    fn exec(ant: AntRef, instruction: &Instruction, map: &mut Map) -> () {
+         let jump_instruction = match *instruction {
             Sense(dir, true_label, false_label, cond) => {
-                // Calcule la cellule à vérifier
-                let cell = match dir {
-                    SenseDirection::Ahead => self.target_cell(),
-                    SenseDirection::Left => {
-                        self.direction = self.direction.previous();
-                        let c = self.target_cell();
-                        self.direction = self.direction.next();
-                        c
-                    }
-                    SenseDirection::Right => {
-                        self.direction = self.direction.next();
-                        let c = self.target_cell();
-                        self.direction = self.direction.previous();
-                        c
-                    }
-                    SenseDirection::Here => self.position
-                };
-                // Puis vérifie la condition donnée
-                if map.check_cond(cell, self.color, cond) {
-                    Some(true_label)
+                // Calculates the target cell's index
+                let cell = (*ant).borrow().target_cell(dir);
+                // Then checks the given condition and change the current instruction
+                // accordingly
+                Some(if map.check_condition(cond, (*ant).borrow().colour, cell) {
+                    true_label
                 } else {
-                    Some(false_label)
-                }
+                    false_label
+                })
             },
             Mark(i) => {
-                map.mark_pheromone(self.position, i, self.color);
+                map.mark_pheromone((*ant).borrow().position, i, (*ant).borrow().colour);
                 None
             },
             Unmark(i) => {
-                map.unmark_pheromone(self.position, i, self.color);
+                map.unmark_pheromone((*ant).borrow().position, i, (*ant).borrow().colour);
                 None
             },
             Pickup(fail_label) => {
-                if !self.has_food && map.pickup_food(self.position) {
-                    self.has_food = true;
+                if !(*ant).borrow().has_food && map.pickup_food((*ant).borrow().position) {
+                    (*ant).borrow_mut().has_food = true;
                     None
                 } else {
                     Some(fail_label)
                 }
             },
             Drop => {
-                if self.has_food {
-                    map.drop_food(self.position);
+                if (*ant).borrow().has_food {
+                    map.drop_food((*ant).borrow().position);
                 }
+                (*ant).borrow_mut().has_food = false;
                 None
             },
-            Turn(dir) => {
-                if dir == TurnDirection::Left {
-                    self.direction = self.direction.previous()
-                } else {
-                    self.direction = self.direction.next()
-                }
+            Turn(TurnDirection::Left) => {
+                let next_direction = (*ant).borrow().direction.left();
+                (*ant).borrow_mut().direction = next_direction;
+                None
+            },
+            Turn(TurnDirection::Right) => {
+                let next_direction = (*ant).borrow().direction.right();
+                (*ant).borrow_mut().direction = next_direction;
                 None
             },
             Move(fail_label) => {
-                if map.try_move(self.position, self.target_cell()) {
-                    self.position = self.target_cell();
-                    self.cooldown = 14;
+                let from = (*ant).borrow().position;
+                let to = (*ant).borrow().target_cell(SenseDirection::Ahead);
+                if map.move_to(from, to) {
+                    (*ant).borrow_mut().position = to;
+                    (*ant).borrow_mut().cooldown = 14;
                     None
                 } else {
                     Some(fail_label)
                 }
             },
             Flip(p, success_label, failure_label) => {
-                let mut rng = rand::prelude::thread_rng();
-                if rng.gen_range(0..p) == 0 {
-                    Some(success_label)
+                let rng = rand::thread_rng().gen_range(0..p);
+                Some(if rng == 0 {
+                    success_label
                 } else {
-                    Some(failure_label)
-                }
+                    failure_label
+                })
             },
             Goto(label) => Some(label)
+        };
+
+        if let Some(instruction) = jump_instruction {
+            (*ant).borrow_mut().current_instruction = instruction
+        } else {
+            (*ant).borrow_mut().current_instruction += 1
         }
     }
 
-    fn target_cell(&self) -> (usize, usize) {
+    fn target_cell(&self, direction: SenseDirection) -> (usize, usize) {
         let (x, y) = self.position;
-        match self.direction {
-            CardinalDirection::North => (x, y+1),
-            CardinalDirection::NorthEast => (x+1, y+1),
-            CardinalDirection::NorthWest => (x-1, y+1),
-            CardinalDirection::South => (x, y-1),
-            CardinalDirection::SouthEast => (x+1, y-1),
-            CardinalDirection::SouthWest => (x-1, y-1)
+        let sense_direction = match direction {
+            SenseDirection::Right => self.direction.right(),
+            SenseDirection::Left => self.direction.left(),
+            SenseDirection::Here => return self.position,
+            _ => self.direction
+        };
+        match sense_direction {
+            CardinalDirection::West => (x-1, y),
+            CardinalDirection::NorthEast => (x+1, y-1),
+            CardinalDirection::NorthWest => (x-1, y-1),
+            CardinalDirection::East => (x+1, y),
+            CardinalDirection::SouthEast => (x+1, y+1),
+            CardinalDirection::SouthWest => (x-1, y+1)
         }
     }
 }

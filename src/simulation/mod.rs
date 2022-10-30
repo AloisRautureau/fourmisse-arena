@@ -2,54 +2,53 @@ pub mod ant;
 pub mod map;
 pub mod instruction;
 
+use std::borrow::Borrow;
 use std::cell::RefCell;
-use ant::Ant;
+use std::rc::Rc;
 use map::Map;
 use instruction::InstructionSet;
-use crate::simulation::ant::Color;
+use crate::simulation::ant::Ant;
+use crate::simulation::instruction::load_instructionset;
+use crate::simulation::map::AntRef;
 
-// Contient l'état actuel d'une simulation
-pub struct SimulationState {
-    entities: Vec<RefCell<Ant>>,
-    map: Map,
+// Represents the current state of a simulation
+pub struct Simulation {
+    pub ants: Vec<AntRef>,
+    pub map: Map,
     instructions: [InstructionSet; 2]
 }
-impl SimulationState {
-    pub fn new(size: (usize, usize)) -> Self {
+impl Simulation {
+    pub fn new(map_path: &str, red_brain_path: &str, black_brain_path: &str) -> Self {
+        let (map, ants) = Map::load_file(map_path);
         Self {
-            entities: vec!(),
-            map: Map::new_empty(size),
-            instructions: [vec!(), vec!()]
+            ants,
+            map,
+            instructions: [
+                load_instructionset(red_brain_path),
+                load_instructionset(black_brain_path)
+            ]
         }
     }
 
-    pub fn load_map(&mut self, path: &str) {
-        let (map, entities) = Map::load_file(path);
-        self.map = map;
-        self.entities = entities;
-    }
-
-    // Passe au prochain état de la simulation
+    // Each ant executes its current instruction, then
+    // surrounded ants are killed
     pub fn process_tick(&mut self) {
-        // Fait passer chaque fourmi au prochain tick
-        for entity in &mut self.entities {
-            let instruction_set_index = match entity.color {
-                Color::Red => 0,
-                Color::Black => 1
+        // Each ant moves
+        for ant in &mut self.ants {
+            let ant = Rc::clone(ant);
+            let instruction_set = {
+                let a: &RefCell<Ant> = ant.borrow();
+                &self.instructions[a.borrow().colour.as_index()]
             };
-            entity.process_tick(&mut self.map, &mut self.instructions[instruction_set_index])
+            Ant::process_tick(ant, &mut self.map, instruction_set)
         }
 
-        // Puis nettoie les fourmis mortes s'il y en a
-        let mut to_remove: Vec<usize> = vec!();
-        for (i, entity) in self.entities.iter_mut().enumerate() {
-            if self.map.is_surrounded(entity.position) {
-                self.map.remove_ant(entity.position);
-                to_remove.push(i);
-            }
-        }
-        for i in to_remove {
-            self.entities.remove(i);
-        }
+        // Surrounded ants are killed
+        // TODO
+    }
+
+    // Returns the current food units in each nest
+    pub fn points(&self) -> (u32, u32) {
+        self.map.points()
     }
 }
