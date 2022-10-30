@@ -1,0 +1,13 @@
+[package]
+name = "fourmisse-arena"
+description = "Small simulator dedicated to run fourmisses tournaments"
+authors = ["Aloïs 'baub' Rautureau"]
+version = "0.5.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.8.4"
+regex = "1.6.0"
+clap = { version = "4.0.18", features = ["derive"] }
