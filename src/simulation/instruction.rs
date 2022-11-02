@@ -1,8 +1,8 @@
+use regex::Regex;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
-use std::collections::HashMap;
-use regex::Regex;
 
 type Label = usize;
 
@@ -11,7 +11,7 @@ pub enum SenseDirection {
     Ahead,
     Left,
     Right,
-    Here
+    Here,
 }
 impl From<String> for SenseDirection {
     fn from(s: String) -> Self {
@@ -20,7 +20,7 @@ impl From<String> for SenseDirection {
             "LeftAhead" => Self::Left,
             "RightAhead" => Self::Right,
             "Here" => Self::Here,
-            _ => panic!("Not a valid SenseDirection")
+            _ => panic!("Not a valid SenseDirection"),
         }
     }
 }
@@ -28,14 +28,14 @@ impl From<String> for SenseDirection {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum TurnDirection {
     Left,
-    Right
+    Right,
 }
 impl From<String> for TurnDirection {
     fn from(s: String) -> Self {
         match s.as_str() {
             "Left" => Self::Left,
             "Right" => Self::Right,
-            _ => panic!("Not a valid TurnDirection")
+            _ => panic!("Not a valid TurnDirection"),
         }
     }
 }
@@ -51,7 +51,7 @@ pub enum Cond {
     Marker(usize),
     FoeMarker,
     Home,
-    FoeHome
+    FoeHome,
 }
 impl From<(String, Option<usize>)> for Cond {
     fn from((s, i): (String, Option<usize>)) -> Self {
@@ -67,7 +67,7 @@ impl From<(String, Option<usize>)> for Cond {
             "FoeMarker" => Self::FoeMarker,
             "Home" => Self::Home,
             "FoeHome" => Self::FoeHome,
-            _ => panic!("Not a valid TurnDirection")
+            _ => panic!("Not a valid TurnDirection"),
         }
     }
 }
@@ -83,7 +83,7 @@ pub enum Instruction {
     Turn(TurnDirection),
     Move(Label),
     Flip(usize, Label, Label),
-    Goto(Label)
+    Goto(Label),
 }
 impl From<(String, &HashMap<String, usize>)> for Instruction {
     fn from((instr, label_map): (String, &HashMap<String, usize>)) -> Self {
@@ -92,88 +92,116 @@ impl From<(String, &HashMap<String, usize>)> for Instruction {
         let instruction_type = instruction_parts.next().unwrap();
         match instruction_type {
             "Sense" => {
-                let direction = SenseDirection::from(
-                    String::from(instruction_parts.next()
-                        .expect("Missing parameters to Sense instruction"))
-                );
-                let label1 = label_map.get(
-                    instruction_parts.next()
-                        .expect("Missing argument on Sense instruction")
-                ).expect("Use of an undefined label in Sense instruction");
-                let label2 = label_map.get(
-                    instruction_parts.next()
-                        .expect("Missing argument on Sense instruction")
-                ).expect("Use of an undefined label in Sense instruction");
-                let cond = Cond::from(
-                    (
-                    String::from(instruction_parts.next()
-                        .expect("Missing argument on Sense instruction")),
-                    instruction_parts.next()
-                        .map(|x| x.parse::<usize>().ok())
-                        .flatten()
+                let direction = SenseDirection::from(String::from(
+                    instruction_parts
+                        .next()
+                        .expect("Missing parameters to Sense instruction"),
+                ));
+                let label1 = label_map
+                    .get(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Sense instruction"),
                     )
-                );
+                    .expect("Use of an undefined label in Sense instruction");
+                let label2 = label_map
+                    .get(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Sense instruction"),
+                    )
+                    .expect("Use of an undefined label in Sense instruction");
+                let cond = Cond::from((
+                    String::from(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Sense instruction"),
+                    ),
+                    instruction_parts
+                        .next()
+                        .map(|x| x.parse::<usize>().ok())
+                        .flatten(),
+                ));
                 Instruction::Sense(direction, *label1, *label2, cond)
             }
             "Mark" => {
-                let i = instruction_parts.next()
+                let i = instruction_parts
+                    .next()
                     .expect("Missing argument on Mark instruction")
                     .parse::<usize>()
                     .expect("Argument on Mark instruction is not an integer");
                 Instruction::Mark(i)
             }
             "Unmark" => {
-                let i = instruction_parts.next()
+                let i = instruction_parts
+                    .next()
                     .expect("Missing argument on Unmark instruction")
                     .parse::<usize>()
                     .expect("Argument on Unmark instruction is not an integer");
                 Instruction::Unmark(i)
             }
             "PickUp" => {
-                let label = label_map.get(
-                    instruction_parts.next()
-                        .expect("Missing argument on Pickup instruction")
-                ).expect("Use of an undefined label in Pickup instruction");
+                let label = label_map
+                    .get(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Pickup instruction"),
+                    )
+                    .expect("Use of an undefined label in Pickup instruction");
                 Instruction::Pickup(*label)
             }
             "Drop" => Instruction::Drop,
             "Turn" => {
-                let dir = TurnDirection::from(
-                    String::from(instruction_parts.next()
-                        .expect("Missing argument on Turn instruction"))
-                );
+                let dir = TurnDirection::from(String::from(
+                    instruction_parts
+                        .next()
+                        .expect("Missing argument on Turn instruction"),
+                ));
                 Instruction::Turn(dir)
             }
             "Move" => {
-                let label = label_map.get(
-                    instruction_parts.next()
-                        .expect("Missing argument on Move instruction")
-                ).expect("Use of an undefined label in Move instruction");
+                let label = label_map
+                    .get(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Move instruction"),
+                    )
+                    .expect("Use of an undefined label in Move instruction");
                 Instruction::Move(*label)
             }
             "Flip" => {
-                let p = instruction_parts.next()
+                let p = instruction_parts
+                    .next()
                     .expect("Missing argument on Flip instruction")
                     .parse::<usize>()
                     .expect("Argument of Flip instruction is not an integer");
-                let label1 = label_map.get(
-                    instruction_parts.next()
-                        .expect("Missing argument on Flip instruction")
-                ).expect("Use of an undefined label in Flip instruction");
-                let label2 = label_map.get(
-                    instruction_parts.next()
-                        .expect("Missing argument on Flip instruction")
-                ).expect("Use of an undefined label in Flip instruction");
+                let label1 = label_map
+                    .get(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Flip instruction"),
+                    )
+                    .expect("Use of an undefined label in Flip instruction");
+                let label2 = label_map
+                    .get(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Flip instruction"),
+                    )
+                    .expect("Use of an undefined label in Flip instruction");
                 Instruction::Flip(p, *label1, *label2)
             }
             "Goto" => {
-                let label = label_map.get(
-                    instruction_parts.next()
-                        .expect("Missing argument on Goto instruction")
-                ).expect("Use of an undefined label in Goto instruction");
+                let label = label_map
+                    .get(
+                        instruction_parts
+                            .next()
+                            .expect("Missing argument on Goto instruction"),
+                    )
+                    .expect("Use of an undefined label in Goto instruction");
                 Instruction::Goto(*label)
             }
-            _ => panic!("Invalid instruction")
+            _ => panic!("Invalid instruction"),
         }
     }
 }
@@ -182,7 +210,9 @@ pub type InstructionSet = Vec<Instruction>;
 
 pub fn load_instructionset(path: &str) -> InstructionSet {
     fn read_lines<P>(filename: P) -> io::Result<io::Lines<BufReader<File>>>
-        where P: AsRef<Path>, {
+    where
+        P: AsRef<Path>,
+    {
         let file = File::open(filename)?;
         Ok(BufReader::new(file).lines())
     }
@@ -202,7 +232,8 @@ pub fn load_instructionset(path: &str) -> InstructionSet {
             }
         })
         .enumerate();
-    let instruction_regex = Regex::new(r"Sense|Drop|Mark|Unmark|PickUp|Turn|Move|Flip|Goto").unwrap();
+    let instruction_regex =
+        Regex::new(r"Sense|Drop|Mark|Unmark|PickUp|Turn|Move|Flip|Goto").unwrap();
 
     // During a first pass, we simply care about the labels
     // This lets us create a Map of (label -> line) to make the implementation
@@ -223,9 +254,8 @@ pub fn load_instructionset(path: &str) -> InstructionSet {
     }
     // We can then do a second pass, this time taking care of the
     // actual instructions
-    let lines = read_lines(path)
-        .expect("Could not read the given .brain file");
-    let mut instructions: InstructionSet = vec!();
+    let lines = read_lines(path).expect("Could not read the given .brain file");
+    let mut instructions: InstructionSet = vec![];
     for line in lines {
         if let Ok(line) = line {
             // The line is either an instruction or a label

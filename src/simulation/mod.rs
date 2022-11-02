@@ -1,21 +1,21 @@
 pub mod ant;
-pub mod map;
 pub mod instruction;
+pub mod map;
 
-use std::borrow::Borrow;
-use std::cell::RefCell;
-use std::rc::Rc;
-use map::Map;
-use instruction::InstructionSet;
 use crate::simulation::ant::Ant;
 use crate::simulation::instruction::load_instructionset;
 use crate::simulation::map::AntRef;
+use instruction::InstructionSet;
+use map::Map;
+use std::borrow::Borrow;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 // Represents the current state of a simulation
 pub struct Simulation {
     pub ants: Vec<AntRef>,
     pub map: Map,
-    instructions: [InstructionSet; 2]
+    instructions: [InstructionSet; 2],
 }
 impl Simulation {
     pub fn new(map_path: &str, red_brain_path: &str, black_brain_path: &str) -> Self {
@@ -25,8 +25,8 @@ impl Simulation {
             map,
             instructions: [
                 load_instructionset(red_brain_path),
-                load_instructionset(black_brain_path)
-            ]
+                load_instructionset(black_brain_path),
+            ],
         }
     }
 

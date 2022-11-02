@@ -1,32 +1,34 @@
-use std::fmt::{Debug};
-use std::rc::Rc;
-use rand::Rng;
+use super::instruction::{Instruction, Instruction::*, InstructionSet};
+use super::map::Map;
 use crate::simulation::instruction::{SenseDirection, TurnDirection};
 use crate::simulation::map::AntRef;
-use super::instruction::{InstructionSet, Instruction, Instruction::*};
-use super::map::Map;
+use rand::Rng;
+use std::fmt::Debug;
+use std::rc::Rc;
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum Colour {
     Red,
-    Black
+    Black,
 }
 impl Colour {
     pub fn opposite(&self) -> Self {
         match self {
             Self::Red => Self::Black,
-            _ => Self::Red
+            _ => Self::Red,
         }
     }
     pub fn as_index(&self) -> usize {
         match self {
             Self::Red => 0,
-            _ => 1
+            _ => 1,
         }
     }
 }
 impl Default for Colour {
-    fn default() -> Self { Self::Red }
+    fn default() -> Self {
+        Self::Red
+    }
 }
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum CardinalDirection {
@@ -35,10 +37,12 @@ pub enum CardinalDirection {
     NorthWest,
     NorthEast,
     SouthWest,
-    SouthEast
+    SouthEast,
 }
 impl Default for CardinalDirection {
-    fn default() -> Self { Self::East }
+    fn default() -> Self {
+        Self::East
+    }
 }
 impl CardinalDirection {
     pub fn right(self) -> Self {
@@ -48,7 +52,7 @@ impl CardinalDirection {
             Self::NorthEast => Self::East,
             Self::East => Self::SouthEast,
             Self::SouthEast => Self::SouthWest,
-            Self::SouthWest => Self::West
+            Self::SouthWest => Self::West,
         }
     }
 
@@ -59,7 +63,7 @@ impl CardinalDirection {
             Self::SouthEast => Self::East,
             Self::East => Self::NorthEast,
             Self::NorthEast => Self::NorthWest,
-            Self::NorthWest => Self::West
+            Self::NorthWest => Self::West,
         }
     }
 }
@@ -74,7 +78,7 @@ pub struct Ant {
 
     current_instruction: usize,
     cooldown: usize,
-    direction: CardinalDirection
+    direction: CardinalDirection,
 }
 impl Ant {
     // Creates a new ant of the given colour
@@ -95,7 +99,8 @@ impl Ant {
     // reducing said cooldown by 1
     pub fn process_tick(ant: AntRef, map: &mut Map, instructions: &InstructionSet) {
         if (*ant).borrow().cooldown == 0 {
-            let current_instruction = instructions.get((*ant).borrow().current_instruction)
+            let current_instruction = instructions
+                .get((*ant).borrow().current_instruction)
                 .expect("Instruction count is out of bounds");
             Self::exec(Rc::clone(&ant), current_instruction, map);
         } else {
@@ -107,7 +112,7 @@ impl Ant {
     // The instruction can change the ant's state
     // Returns the index of the next instruction
     fn exec(ant: AntRef, instruction: &Instruction, map: &mut Map) -> () {
-         let jump_instruction = match *instruction {
+        let jump_instruction = match *instruction {
             Sense(dir, true_label, false_label, cond) => {
                 // Calculates the target cell's index
                 let cell = (*ant).borrow().target_cell(dir);
@@ -118,15 +123,15 @@ impl Ant {
                 } else {
                     false_label
                 })
-            },
+            }
             Mark(i) => {
                 map.mark_pheromone((*ant).borrow().position, i, (*ant).borrow().colour);
                 None
-            },
+            }
             Unmark(i) => {
                 map.unmark_pheromone((*ant).borrow().position, i, (*ant).borrow().colour);
                 None
-            },
+            }
             Pickup(fail_label) => {
                 if !(*ant).borrow().has_food && map.pickup_food((*ant).borrow().position) {
                     (*ant).borrow_mut().has_food = true;
@@ -134,24 +139,24 @@ impl Ant {
                 } else {
                     Some(fail_label)
                 }
-            },
+            }
             Drop => {
                 if (*ant).borrow().has_food {
                     map.drop_food((*ant).borrow().position);
                 }
                 (*ant).borrow_mut().has_food = false;
                 None
-            },
+            }
             Turn(TurnDirection::Left) => {
                 let next_direction = (*ant).borrow().direction.left();
                 (*ant).borrow_mut().direction = next_direction;
                 None
-            },
+            }
             Turn(TurnDirection::Right) => {
                 let next_direction = (*ant).borrow().direction.right();
                 (*ant).borrow_mut().direction = next_direction;
                 None
-            },
+            }
             Move(fail_label) => {
                 let from = (*ant).borrow().position;
                 let to = (*ant).borrow().target_cell(SenseDirection::Ahead);
@@ -162,7 +167,7 @@ impl Ant {
                 } else {
                     Some(fail_label)
                 }
-            },
+            }
             Flip(p, success_label, failure_label) => {
                 let rng = rand::thread_rng().gen_range(0..p);
                 Some(if rng == 0 {
@@ -170,8 +175,8 @@ impl Ant {
                 } else {
                     failure_label
                 })
-            },
-            Goto(label) => Some(label)
+            }
+            Goto(label) => Some(label),
         };
 
         if let Some(instruction) = jump_instruction {
@@ -187,15 +192,15 @@ impl Ant {
             SenseDirection::Right => self.direction.right(),
             SenseDirection::Left => self.direction.left(),
             SenseDirection::Here => return self.position,
-            _ => self.direction
+            _ => self.direction,
         };
         match sense_direction {
-            CardinalDirection::West => (x-1, y),
-            CardinalDirection::NorthEast => (x+1, y-1),
-            CardinalDirection::NorthWest => (x-1, y-1),
-            CardinalDirection::East => (x+1, y),
-            CardinalDirection::SouthEast => (x+1, y+1),
-            CardinalDirection::SouthWest => (x-1, y+1)
+            CardinalDirection::West => (x - 1, y),
+            CardinalDirection::NorthEast => (x + 1, y - 1),
+            CardinalDirection::NorthWest => (x - 1, y - 1),
+            CardinalDirection::East => (x + 1, y),
+            CardinalDirection::SouthEast => (x + 1, y + 1),
+            CardinalDirection::SouthWest => (x - 1, y + 1),
         }
     }
 }

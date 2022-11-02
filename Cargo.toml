@@ -8,6 +8,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# Simulator dependencies
 rand = "0.8.4"
 regex = "1.6.0"
 clap = { version = "4.0.18", features = ["derive"] }
+
+# GUI dependencies
+vulkano = "0.31.1"
+winit = "0.27.5"
+vulkano-win = "0.31.0"
+vulkano-shaders = "0.31.1"
+bytemuck = "1.12.1"
+bytemuck_derive = "1.2.1"
+nalgebra-glm = "0.17.0"
