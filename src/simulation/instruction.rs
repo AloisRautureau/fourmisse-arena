@@ -55,7 +55,7 @@ pub enum Cond {
 }
 impl From<(String, Option<usize>)> for Cond {
     fn from((s, i): (String, Option<usize>)) -> Self {
-        let mut instruction_parts = s.split(" ");
+        let mut instruction_parts = s.split(' ');
         match instruction_parts.next().unwrap() {
             "Friend" => Self::Friend,
             "Foe" => Self::Foe,
@@ -88,7 +88,7 @@ pub enum Instruction {
 impl From<(String, &HashMap<String, usize>)> for Instruction {
     fn from((instr, label_map): (String, &HashMap<String, usize>)) -> Self {
         let trimmed = instr.trim();
-        let mut instruction_parts = trimmed.split(" ");
+        let mut instruction_parts = trimmed.split(' ');
         let instruction_type = instruction_parts.next().unwrap();
         match instruction_type {
             "Sense" => {
@@ -119,8 +119,7 @@ impl From<(String, &HashMap<String, usize>)> for Instruction {
                     ),
                     instruction_parts
                         .next()
-                        .map(|x| x.parse::<usize>().ok())
-                        .flatten(),
+                        .and_then(|x| x.parse::<usize>().ok()),
                 ));
                 Instruction::Sense(direction, *label1, *label2, cond)
             }
@@ -222,7 +221,7 @@ pub fn load_instructionset(path: &str) -> InstructionSet {
         .filter_map(|l| {
             if let Ok(s) = l {
                 let s = s.trim();
-                if s.len() == 0 {
+                if s.is_empty() {
                     None
                 } else {
                     Some(String::from(s))
@@ -243,7 +242,7 @@ pub fn load_instructionset(path: &str) -> InstructionSet {
     for (i, line) in lines {
         // The line is either an instruction or a label
         if !instruction_regex.is_match(&line) {
-            let label = line.split(":").next().unwrap();
+            let label = line.split(':').next().unwrap();
             // Little manipulation so that the label is mapped to its location
             // if the labels before it did not exist
             // This lets us completely ignore labels later on, caring only about
@@ -256,12 +255,10 @@ pub fn load_instructionset(path: &str) -> InstructionSet {
     // actual instructions
     let lines = read_lines(path).expect("Could not read the given .brain file");
     let mut instructions: InstructionSet = vec![];
-    for line in lines {
-        if let Ok(line) = line {
-            // The line is either an instruction or a label
-            if instruction_regex.is_match(&line) {
-                instructions.push(Instruction::from((line, &labels_map)));
-            }
+    for line in lines.flatten() {
+        // The line is either an instruction or a label
+        if instruction_regex.is_match(&line) {
+            instructions.push(Instruction::from((line, &labels_map)));
         }
     }
 

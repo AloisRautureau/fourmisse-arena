@@ -3,7 +3,15 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 
+use crate::rendering_engine::{
+    Material, Model, RenderingEngine, ResourceHandle, ResourceHandler, Vertex,
+};
 use crate::simulation::instruction::Cond;
+use crate::simulation::{Simulation, HEXAGON_HEIGHT, HEXAGON_RADIUS, HEXAGON_WIDTH};
+use nalgebra_glm::{
+    identity, inverse_transpose, make_vec3, make_vec4, translate, vec3, vec3_to_vec4, vec4_to_vec3,
+    TMat4,
+};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::ops::{Index, IndexMut};
@@ -11,6 +19,7 @@ use std::rc::Rc;
 
 pub type AntRef = Rc<RefCell<Ant>>;
 
+#[derive(Clone)]
 pub enum Cell {
     Empty {
         food: u8,
@@ -25,12 +34,32 @@ pub enum Cell {
         markers: [u8; 2],
     },
 }
+impl Cell {
+    // Returns the correct material to use when rendering
+    pub fn material(&self) -> Material {
+        match self {
+            Self::Empty { .. } => Material {
+                colour: [0.5961, 0.5922, 0.1020],
+                shininess: 0.0
+            },
+            Self::Nest { colour, .. } => Material {
+                colour: colour.rgb(),
+                shininess: 0.0
+            },
+            Self::Obstacle => Material {
+                colour: [0.4098, 0.1627, 0.0],
+                shininess: 0.0
+            },
+        }
+    }
+}
 
 // A map contains a matrix of cells, which can be obstacles or empty.
 // Empty cells can have at most 9 units of food on them
 pub struct Map {
     cells: Vec<Cell>,
-    size: (usize, usize),
+    transform_matrices: Vec<(TMat4<f32>, TMat4<f32>)>,
+    pub size: (usize, usize),
 }
 impl Map {
     // Loads a map from a file
@@ -39,6 +68,7 @@ impl Map {
         let mut ants = vec![];
         let mut map = Self {
             cells: Vec::new(),
+            transform_matrices: Vec::new(),
             size: (0, 0),
         };
 
@@ -72,8 +102,7 @@ impl Map {
         buff.clear();
 
         // And now the actual map
-        let mut x = 0;
-        let mut y = 0;
+        let (mut x, mut y) = (0, 0);
         let mut id = 0;
         let mut get_id = || {
             id += 1;
@@ -87,13 +116,19 @@ impl Map {
             let s = String::from_utf8(buff).expect("invalid characters in instruction file");
 
             for c in s.chars() {
-                match c {
-                    '#' => map.cells.push(Cell::Obstacle),
-                    '.' => map.cells.push(Cell::Empty {
-                        food: 0,
-                        occupant: None,
-                        markers: [0; 2],
-                    }),
+                let added_cell = match c {
+                    '#' => {
+                        map.cells.push(Cell::Obstacle);
+                        true
+                    }
+                    '.' => {
+                        map.cells.push(Cell::Empty {
+                            food: 0,
+                            occupant: None,
+                            markers: [0; 2],
+                        });
+                        true
+                    }
                     '+' => {
                         let new_ant = Ant::new(get_id(), Colour::Red, (x, y));
                         let ant_ref = Rc::new(RefCell::new(new_ant));
@@ -104,6 +139,7 @@ impl Map {
                             occupant: Some(Rc::clone(&ant_ref)),
                             markers: [0; 2],
                         });
+                        true
                     }
                     '-' => {
                         let new_ant = Ant::new(get_id(), Colour::Black, (x, y));
@@ -115,24 +151,40 @@ impl Map {
                             occupant: Some(Rc::clone(&ant_ref)),
                             markers: [0; 2],
                         });
+                        true
                     }
-                    ' ' => (),
+                    ' ' => false,
                     '\n' => {
                         y += 1;
                         x = 0;
+                        false
                     }
                     _ => {
-                        if c.is_digit(10) {
+                        if c.is_ascii_digit() {
                             let food = c.to_digit(10).unwrap() as u8;
                             map.cells.push(Cell::Empty {
                                 food,
                                 occupant: None,
                                 markers: [0; 2],
                             });
+                            true
+                        } else {
+                            false
                         }
                     }
-                }
-                if !(c == ' ' || c == '\n') {
+                };
+
+                if added_cell {
+                    let mut render_position = Simulation::render_position((x, y));
+                    render_position.y = if matches!(map.cells.last().unwrap(), Cell::Obstacle) {
+                        0.2
+                    } else {
+                        -HEXAGON_RADIUS / 2_f32
+                    };
+                    let model_matrix = translate(&identity(), &render_position);
+                    let normals_matrix = inverse_transpose(model_matrix);
+                    map.transform_matrices.push((model_matrix, normals_matrix));
+
                     x += 1
                 }
             }
@@ -312,6 +364,24 @@ impl Map {
         }
         (red_points, black_points)
     }
+
+    // Returns a set of vertices representing the entire map
+    // as one model
+    pub fn render(
+        &self,
+        renderer: &mut RenderingEngine,
+        tile_model_handle: ResourceHandle,
+        resource_handler: &ResourceHandler,
+    ) {
+        for (cell, (model, normal)) in self.cells.iter().zip(&self.transform_matrices) {
+            renderer.add_model(
+                tile_model_handle,
+                resource_handler,
+                (*model, *normal),
+                &cell.material(),
+            );
+        }
+    }
 }
 impl Index<(usize, usize)> for Map {
     type Output = Cell;
@@ -335,12 +405,12 @@ impl Debug for Map {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, c) in self.cells.iter().enumerate() {
             if i % self.size.0 == 0 {
-                if ((i / self.size.0) % 2) == 0 {
-                    write!(f, "\n")?
-                } else {
-                    write!(f, "\n ")?
+                writeln!(f)?;
+                if (i / self.size.0) % 2 == 0 {
+                    write!(f, " ")?
                 }
             }
+
             write!(
                 f,
                 "{} ",

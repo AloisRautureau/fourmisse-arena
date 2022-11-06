@@ -1,10 +1,8 @@
 #version 450
 
-layout(location = 0) in vec3 in_position;
-
 layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput u_vertex_color;
 
-layout(set = 0, binding = 2) uniform AmbientLight {
+layout(set = 0, binding = 1) uniform AmbientLight {
     vec3 color;
     float intensity;
 } ambient;

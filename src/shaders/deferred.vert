@@ -2,21 +2,24 @@
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
-layout(location = 2) in vec3 color;
 
-layout(location = 0) out vec3 out_color;
-layout(location = 1) out vec3 out_normal;
-
-layout(set = 0, binding = 0) uniform MVP {
-    mat4 model;
+layout(set = 0, binding = 0) uniform VP {
     mat4 view;
     mat4 projection;
-} mvp;
+} vp;
+layout(set = 1, binding = 0) uniform Model {
+    mat4 model_transform;
+    mat4 normals_transform;
+} model;
+
+layout(location = 0) out vec3 out_normal;
+layout(location = 1) out vec4 out_frag_pos;
 
 void main() {
-    mat4 worldview = mvp.view * mvp.model;
-    gl_Position = mvp.projection * worldview * vec4(position, 1.0);
+    mat4 vp_matrix = vp.projection * vp.view;
+    vec4 frag_position = vp_matrix * model.model_transform * vec4(position, 1.0);
+    gl_Position = frag_position;
 
-    out_color = color;
-    out_normal = mat3(mvp.model) * normal;
+    out_normal = mat3(model.normals_transform) * normal;
+    out_frag_pos = frag_position;
 }
