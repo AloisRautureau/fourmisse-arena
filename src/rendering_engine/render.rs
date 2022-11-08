@@ -1,6 +1,6 @@
 use crate::rendering_engine::materials::Material;
 use crate::rendering_engine::resource_handler::ResourceHandler;
-use crate::rendering_engine::{deferred_fragment_shader, deferred_vertex_shader, DirectionalLightSource, RenderStage, RenderingEngine, ResourceHandle, directional_fragment_shader};
+use crate::rendering_engine::{deferred_fragment_shader, deferred_vertex_shader, LightSource, RenderStage, RenderingEngine, ResourceHandle, directional_fragment_shader};
 use nalgebra_glm::TMat4;
 use std::mem;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess};
@@ -50,12 +50,12 @@ impl RenderingEngine {
         };
 
         let clear_values =  vec![
-            Some([0_f32; 4].into()), // Colour
-            Some([0_f32; 2].into()), // Depth image,
-            Some([0_f32; 4].into()), // Depth image,
-            Some([0_f32; 4].into()), // Depth image,
-            Some([0_f32; 2].into()), // Specular light
-            Some([1_f32, 0_f32].into())
+            Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Final colour
+            Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Vertex colour,
+            Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Normals,
+            Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Fragment position,
+            Some(ClearValue::from([0f32; 2])), // Specular light
+            Some(ClearValue::DepthStencil((1f32, 0))) // Depth stencil
         ];
         let mut commands = AutoCommandBufferBuilder::primary(
             self.device.clone(),
@@ -107,7 +107,8 @@ impl RenderingEngine {
         let material_buffer = {
             let uniform_data = deferred_fragment_shader::ty::Material {
                 color: material.colour,
-                shininess: material.shininess
+                shininess: material.shininess,
+                spec_intensity: material.specular_intensity
             };
             self.material_buffer_pool
                 .from_data(uniform_data)
@@ -215,7 +216,7 @@ impl RenderingEngine {
     }
 
     // Adds a directional light source to our world
-    pub fn add_directional_light(&mut self, directional_light: &DirectionalLightSource) {
+    pub fn add_directional_light(&mut self, directional_light: &LightSource) {
         match self.render_stage {
             RenderStage::Ambient => self.render_stage = RenderStage::Directional,
             RenderStage::Directional => (),
@@ -236,8 +237,10 @@ impl RenderingEngine {
                 position: self.vp_matrix.camera_position.into()
             }
         ).unwrap();
+
         let directional_buffer =
             directional_light.generate_directional_buffer(&self.directional_buffer_pool);
+
         let directional_layout = self
             .directional_pipeline
             .layout()
@@ -254,8 +257,7 @@ impl RenderingEngine {
                 WriteDescriptorSet::buffer(4, camera_buffer.clone()),
                 WriteDescriptorSet::buffer(5, directional_buffer.clone())
             ],
-        )
-        .unwrap();
+        ).unwrap();
 
         // Adding to our command queue
         let mut commands = self.commands.take().unwrap();

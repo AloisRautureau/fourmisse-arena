@@ -37,7 +37,6 @@ use vulkano::{
     swapchain::{Surface, Swapchain},
     sync::GpuFuture,
 };
-use vulkano::format::ClearValue;
 use winit::window::Window;
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug)]
@@ -67,7 +66,7 @@ pub struct RenderingEngine {
     vp_descriptor_set: Arc<PersistentDescriptorSet>,
     model_buffer_pool: CpuBufferPool<deferred_vertex_shader::ty::Model>,
     material_buffer_pool: CpuBufferPool<deferred_fragment_shader::ty::Material>,
-    directional_buffer_pool: CpuBufferPool<directional_fragment_shader::ty::DirectionalLight>,
+    directional_buffer_pool: CpuBufferPool<directional_fragment_shader::ty::LightSource>,
     ambient_buffer: Arc<CpuAccessibleBuffer<ambient_fragment_shader::ty::AmbientLight>>,
 
     // Pipelines

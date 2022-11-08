@@ -1,12 +1,10 @@
 use super::instruction::{Instruction, Instruction::*, InstructionSet};
 use super::map::Map;
-use crate::rendering_engine::{Material, RenderingEngine, ResourceHandle, ResourceHandler};
+use crate::rendering_engine::{LightSource, Material, RenderingEngine, ResourceHandle, ResourceHandler};
 use crate::simulation::instruction::{SenseDirection, TurnDirection};
 use crate::simulation::map::AntRef;
 use crate::simulation::{Simulation, HEXAGON_HEIGHT, HEXAGON_RADIUS, HEXAGON_WIDTH};
-use nalgebra_glm::{
-    identity, inverse_transpose, pi, rotate_normalized_axis, translate, vec3, TMat4, TVec3,
-};
+use nalgebra_glm::{identity, inverse_transpose, pi, rotate_normalized_axis, translate, vec3, TMat4, TVec3, vec3_to_vec4, make_vec3};
 use rand::Rng;
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -128,7 +126,8 @@ impl Ant {
 
             material: Material {
                 colour: colour.rgb(),
-                shininess: 0.0
+                shininess: 128.0,
+                specular_intensity: 1.0
             },
             render_pos: Simulation::render_position(position),
             render_rot: CardinalDirection::default().as_angle(),
@@ -141,92 +140,83 @@ impl Ant {
 
     // Processes one tick, executing a command if the ant is off cooldown, and
     // reducing said cooldown by 1
-    pub fn process_tick(ant: AntRef, map: &mut Map, instructions: &InstructionSet) {
-        if (*ant).borrow().cooldown == 0 {
+    // Returns a boolean, indicating whether the ant has moved
+    pub fn process_tick(&mut self, map: &mut Map, instructions: &InstructionSet) -> bool {
+        if self.cooldown == 0 {
             let current_instruction = instructions
-                .get((*ant).borrow().current_instruction)
+                .get(self.current_instruction)
                 .expect("Instruction count is out of bounds");
-            Self::exec(Rc::clone(&ant), current_instruction, map);
+            self.exec(current_instruction, map);
+            matches!(current_instruction, Instruction::Move(_))
         } else {
-            (*ant).borrow_mut().cooldown -= 1
+            self.cooldown -= 1;
+            false
         }
     }
 
     // Executes a given instruction, ant's state and map
     // The instruction can change the ant's state
     // Returns the index of the next instruction
-    fn exec(ant: AntRef, instruction: &Instruction, map: &mut Map) {
-        let jump_instruction = match *instruction {
+    fn exec(&mut self, instruction: &Instruction, map: &mut Map) {
+        self.current_instruction += 1;
+        match *instruction {
             Sense(dir, true_label, false_label, cond) => {
                 // Calculates the target cell's index
-                let cell = (*ant).borrow().target_cell(dir);
+                let cell = self.target_cell(dir);
                 // Then checks the given condition and change the current instruction
                 // accordingly
-                Some(if map.check_condition(cond, (*ant).borrow().colour, cell) {
+                self.current_instruction = if map.check_condition(cond, self.colour, cell) {
                     true_label
                 } else {
                     false_label
-                })
+                }
             }
             Mark(i) => {
-                map.mark_pheromone((*ant).borrow().position, i, (*ant).borrow().colour);
-                None
+                map.mark_pheromone(self.position, i, self.colour);
             }
             Unmark(i) => {
-                map.unmark_pheromone((*ant).borrow().position, i, (*ant).borrow().colour);
-                None
+                map.unmark_pheromone(self.position, i, self.colour);
             }
             Pickup(fail_label) => {
-                if !(*ant).borrow().has_food && map.pickup_food((*ant).borrow().position) {
-                    (*ant).borrow_mut().has_food = true;
-                    None
+                if !self.has_food && map.pickup_food(self.position) {
+                    self.has_food = true;
                 } else {
-                    Some(fail_label)
+                    self.current_instruction = fail_label
                 }
             }
             Drop => {
-                if (*ant).borrow().has_food {
-                    map.drop_food((*ant).borrow().position);
-                    (*ant).borrow_mut().has_food = false
+                if self.has_food {
+                    map.drop_food(self.position);
+                    self.has_food = false
                 }
-                None
             }
             Turn(TurnDirection::Left) => {
-                let next_direction = (*ant).borrow().direction.left();
-                (*ant).borrow_mut().direction = next_direction;
-                None
+                let next_direction = self.direction.left();
+                self.direction = next_direction;
             }
             Turn(TurnDirection::Right) => {
-                let next_direction = (*ant).borrow().direction.right();
-                (*ant).borrow_mut().direction = next_direction;
-                None
+                let next_direction = self.direction.right();
+                self.direction = next_direction;
             }
             Move(fail_label) => {
-                let from = (*ant).borrow().position;
-                let to = (*ant).borrow().target_cell(SenseDirection::Ahead);
-                if map.move_to(from, to) {
-                    (*ant).borrow_mut().position = to;
-                    (*ant).borrow_mut().cooldown = 14;
-                    None
+                let from = self.position;
+                let to = self.target_cell(SenseDirection::Ahead);
+                if map.move_to(self.colour, from, to) {
+                    self.position = to;
+                    self.cooldown = 14;
                 } else {
-                    Some(fail_label)
+                    self.current_instruction = fail_label
                 }
             }
             Flip(p, success_label, failure_label) => {
                 let rng = rand::thread_rng().gen_range(0..p);
-                Some(if rng == 0 {
+                self.current_instruction = if rng == 0 {
                     success_label
                 } else {
                     failure_label
-                })
+                }
             }
-            Goto(label) => Some(label),
-        };
-
-        if let Some(instruction) = jump_instruction {
-            (*ant).borrow_mut().current_instruction = instruction
-        } else {
-            (*ant).borrow_mut().current_instruction += 1
+            Goto(label) => self.current_instruction = label,
         }
     }
 
@@ -253,6 +243,7 @@ impl Ant {
         &mut self,
         renderer: &mut RenderingEngine,
         ant_model_handle: ResourceHandle,
+        food_model_handle: ResourceHandle,
         resource_handler: &ResourceHandler,
     ) {
         renderer.add_model(
@@ -261,6 +252,29 @@ impl Ant {
             self.model_matrices(),
             &self.material,
         );
+
+        if self.has_food {
+            Simulation::render_food_piece(
+                renderer,
+                food_model_handle,
+                resource_handler,
+                self.render_pos + vec3(0f32, 0.3, 0f32),
+                self.render_rot
+            )
+        }
+    }
+    pub fn render_light(&self, renderer: &mut RenderingEngine) {
+        let mut vector = vec3_to_vec4(&self.render_pos);
+        vector.w = 1f32;
+        let vector = vector.data.0[0];
+        renderer.add_directional_light(&LightSource {
+            color: [0.1; 3],
+            vector,
+        });
+
+        if self.has_food {
+            Simulation::render_food_light(renderer, self.render_pos + vec3(0f32, 0.3, 0f32));
+        }
     }
 
     // Returns both the model transformation matrix, as well as the corresponding normal
@@ -272,7 +286,7 @@ impl Ant {
                 rotate_normalized_axis(&identity(), self.render_rot, &vec3(0_f32, 1_f32, 0_f32));
 
             self.model_matrix = translation_matrix * rotation_matrix;
-            self.normals_matrix = inverse_transpose(self.model_matrix);
+            self.normals_matrix = self.model_matrix;
             self.should_update_matrices = false
         }
         (self.model_matrix, self.normals_matrix)

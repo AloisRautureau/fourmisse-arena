@@ -71,7 +71,7 @@ pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
                 }
                 DeviceEvent::MouseWheel { delta } => match delta {
                     MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
-                        rendering_engine.move_camera(&(vec3(y as f32, y as f32, y as f32) / 10_f32))
+                        rendering_engine.move_camera(&(vec3(y as f32, y as f32, y as f32) / 100_f32))
                     }
                     MouseScrollDelta::LineDelta(_, y) => {
                         rendering_engine.move_camera(&(vec3(y as f32, y as f32, y as f32) / 10_f32))
@@ -96,7 +96,7 @@ pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
         Event::RedrawEventsCleared => {
             if sim_running && simulation_ticks_left == 0 {
                 sim_running = false;
-                let (red_points, black_points) = simulation.points();
+                let (red_points, black_points) = simulation.score();
                 println!("{} : {}", red_points, black_points)
             }
 
@@ -142,7 +142,7 @@ pub fn run(world: String, brains: (String, String), ticks: Option<usize>) {
         simulation.process_tick()
     }
 
-    let (red_points, black_points) = simulation.points();
+    let (red_points, black_points) = simulation.score();
     match red_points.cmp(&black_points) {
         Ordering::Greater => println!(
             "Red ants won with {} against {} for black ants",
@@ -179,7 +179,7 @@ pub fn get_average_score(
             simulation.process_tick()
         }
 
-        let (red_points, black_points) = simulation.points();
+        let (red_points, black_points) = simulation.score();
         if g % 2 == 0 {
             total_score_red.0 += red_points;
             total_score_black.1 += black_points;

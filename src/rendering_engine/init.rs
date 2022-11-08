@@ -230,7 +230,7 @@ impl super::RenderingEngine {
                 },
                 {
                     color: [color],
-                    depth_stencil: {depth},
+                    depth_stencil: {},
                     input: [vertex_color, normal, frag_pos, specular]
                 }
             ]
@@ -364,8 +364,8 @@ impl super::RenderingEngine {
             },
             false,
             ambient_fragment_shader::ty::AmbientLight {
-                color: [1_f32; 3],
-                intensity: 1_f32,
+                color: [1f32; 3],
+                intensity: 0.2,
             },
         )
         .unwrap();
@@ -375,7 +375,7 @@ impl super::RenderingEngine {
         let material_buffer_pool =
             CpuBufferPool::<deferred_fragment_shader::ty::Material>::uniform_buffer(device.clone());
         let directional_buffer_pool = CpuBufferPool::<
-            directional_fragment_shader::ty::DirectionalLight,
+            directional_fragment_shader::ty::LightSource,
         >::uniform_buffer(device.clone());
 
         Self {
@@ -431,28 +431,30 @@ pub fn window_size_dependent_setup(
 ) -> FramebuffersAndAttachments {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
+    let depth_buffer = ImageView::new_default(
+        AttachmentImage::transient(
+            device.clone(),
+            dimensions,
+            Format::D32_SFLOAT_S8_UINT
+        ).unwrap(),
+    ).unwrap();
+
     let vertex_color_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             device.clone(),
             dimensions,
             Format::A2B10G10R10_UNORM_PACK32,
-        )
-        .unwrap(),
-    )
-    .unwrap();
+        ).unwrap(),
+    ).unwrap();
+
     let normal_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             device.clone(),
             dimensions,
             Format::R16G16B16A16_SFLOAT,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let depth_buffer = ImageView::new_default(
-        AttachmentImage::transient(device.clone(), dimensions, Format::D32_SFLOAT_S8_UINT).unwrap(),
-    )
-    .unwrap();
+        ).unwrap(),
+    ).unwrap();
+
     let frag_pos_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             device.clone(),

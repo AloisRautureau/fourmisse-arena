@@ -11,25 +11,23 @@ pub struct AmbientLightSource {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct DirectionalLightSource {
+pub struct LightSource {
     pub color: [f32; 3],
-    pub position: [f32; 3],
-    pub intensity: f32,
+    pub vector: [f32; 4],
 }
-impl DirectionalLightSource {
+impl LightSource {
     pub fn generate_directional_buffer(
         &self,
-        pool: &CpuBufferPool<directional_fragment_shader::ty::DirectionalLight>,
+        pool: &CpuBufferPool<directional_fragment_shader::ty::LightSource>,
     ) -> Arc<
         CpuBufferPoolSubbuffer<
-            directional_fragment_shader::ty::DirectionalLight,
+            directional_fragment_shader::ty::LightSource,
             Arc<StandardMemoryPool>,
         >,
     > {
-        let uniform_data = directional_fragment_shader::ty::DirectionalLight {
+        let uniform_data = directional_fragment_shader::ty::LightSource {
             color: self.color,
-            intensity: self.intensity,
-            position: self.position,
+            vector: self.vector,
         };
         pool.from_data(uniform_data)
             .unwrap_or_else(|err| panic!("failed to create directional subbuffer: {:?}", err))
