@@ -6,7 +6,7 @@ use crate::rendering_engine::{Material, RenderingEngine, ResourceHandle, Resourc
 use crate::simulation::instruction::Cond;
 use crate::simulation::{Simulation, HEXAGON_HEIGHT, HEXAGON_RADIUS, HEXAGON_WIDTH};
 use crate::Vertex;
-use nalgebra_glm::{identity, inverse_transpose, pi, translate, trunc, vec3, TMat4};
+use nalgebra_glm::{identity, pi, translate, vec3, TMat4};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::ops::{Index, IndexMut};
@@ -32,40 +32,55 @@ pub enum Cell {
 impl Cell {
     // Returns the correct material to use when rendering
     pub fn material(&self) -> Material {
-        match self {
-            Self::Empty { .. } => Material {
-                // colour: [0.5961, 0.5922, 0.1020],
-                shininess: 32.0,
-                specular_intensity: 1.0,
-            },
-            Self::Nest { colour, .. } => Material {
-                // colour: colour.rgb(),
-                shininess: 32.0,
-                specular_intensity: 1.0,
-            },
-            Self::Obstacle => Material {
-                // colour: [0.4098, 0.1627, 0.0],
-                shininess: 32.0,
-                specular_intensity: 1.0,
-            },
+        Material {
+            shininess: 32.0,
+            specular_intensity: 1.0,
         }
     }
 
-    pub fn colour(&self) -> [f32; 3] {
-        match self {
-            Self::Empty { .. } => [0.5961, 0.5922, 0.1020],
-            Self::Nest { colour, .. } => colour.rgb(),
-            Self::Obstacle => [0.4098, 0.1627, 0.0],
+    pub fn colour(&self, pov: Pov) -> [f32; 3] {
+        let colour_from_marker = |marker| {
+            let max: u8 = 0b11;
+            [
+                (max - (marker >> 4)) as f32 / max as f32,
+                (max - (marker >> 2) & max) as f32 / max as f32,
+                (max - (marker & 0b11)) as f32 / max as f32
+            ]
+        };
+        match pov {
+            Pov::Both => match self {
+                Self::Empty { .. } => [0.5961, 0.5922, 0.1020],
+                Self::Nest { colour, .. } => colour.rgb(),
+                Self::Obstacle => [0.4098, 0.1627, 0.0],
+            },
+            Pov::RedAnts => match self {
+                Self::Empty { markers, .. } | Self::Nest { colour: Colour::Black, markers, .. } => colour_from_marker(markers[0]),
+                Self::Nest { colour: Colour::Red, .. } => Colour::Red.rgb(),
+                Self::Obstacle => [0.1, 0.1, 0.1],
+            },
+            Pov::BlackAnts =>  match self {
+                Self::Empty { markers, .. } | Self::Nest { colour: Colour::Red, markers, .. } => colour_from_marker(markers[1]),
+                Self::Nest { colour: Colour::Black, .. } => Colour::Black.rgb(),
+                Self::Obstacle => [0.1, 0.1, 0.1],
+            }
         }
+
     }
 }
 
 // A map contains a matrix of cells, which can be obstacles or empty.
 // Empty cells can have at most 9 units of food on them
+#[derive(Eq, PartialEq, Clone, Copy)]
+pub enum Pov {
+    Both,
+    RedAnts,
+    BlackAnts,
+}
 pub struct Map {
     cells: Vec<Cell>,
     kill_marks: Vec<bool>,
     vertices: Vec<Vertex>,
+    rendered_pov: Pov,
     model_matrices: Vec<TMat4<f32>>,
     pub size: (usize, usize),
 }
@@ -82,6 +97,7 @@ impl Map {
             cells: Vec::new(),
             kill_marks: Vec::new(),
             vertices: Vec::new(),
+            rendered_pov: Pov::Both,
             model_matrices: Vec::new(),
             size: (0, 0),
         };
@@ -204,11 +220,12 @@ impl Map {
                     {
                         let mut modified = *vertex;
                         modified.translate(&render_position);
-                        modified.colour = map.cells.last().unwrap().colour();
+                        modified.colour = map.cells.last().unwrap().colour(Pov::Both);
                         map.vertices.push(modified)
                     }
                     map.model_matrices
                         .push(translate(&identity(), &render_position));
+                    map.kill_marks.push(false);
 
                     x += 1
                 }
@@ -217,6 +234,8 @@ impl Map {
             buff = s.into_bytes();
             buff.clear();
         }
+
+        println!("{}", map.vertices.len() / map.cells.len());
 
         (map, ants)
     }
@@ -228,6 +247,10 @@ impl Map {
                 Cell::Nest { markers, .. } => markers[color.as_index()] |= 1 << i,
                 _ => (),
             }
+
+            if self.rendered_pov != Pov::Both {
+                self.change_cell_colour(cell, self[cell].colour(self.rendered_pov))
+            }
         }
     }
     pub fn unmark_pheromone(&mut self, cell: (usize, usize), i: usize, color: Colour) {
@@ -236,6 +259,10 @@ impl Map {
                 Cell::Empty { markers, .. } => markers[color.as_index()] &= !(1 << i),
                 Cell::Nest { markers, .. } => markers[color.as_index()] |= !(1 << i),
                 _ => (),
+            }
+
+            if self.rendered_pov != Pov::Both {
+                self.change_cell_colour(cell, self[cell].colour(self.rendered_pov))
             }
         }
     }
@@ -285,6 +312,18 @@ impl Map {
             true
         }
     }
+
+    fn occupied(&self, cell: (usize, usize)) -> bool {
+        // Checks whether what we want to check is in bounds or not
+        if cell.0 >= self.size.0 || cell.1 >= self.size.1 {
+            return true;
+        }
+        match &self[cell] {
+            Cell::Empty { occupant, .. } | Cell::Nest { occupant, .. } => occupant.is_some(),
+            _ => true,
+        }
+    }
+
     // Checks and removes killed ants, starting the checkup from a given starting point
     // This lets us check after every move, setting the destination of the move as the start point
     fn mark_killed_ants(&mut self, colour: Colour, position: (usize, usize)) {
@@ -354,23 +393,13 @@ impl Map {
         let marked_cells = self
             .cells
             .iter_mut()
-            .zip(&self.kill_marks)
-            .filter_map(|(c, m)| if *m { Some(c) } else { None });
-        for cell in marked_cells {
+            .zip(&mut self.kill_marks)
+            .filter_map(|(c, m)| if *m { Some((c, m)) } else { None });
+        for (cell, mark) in marked_cells {
             if let Cell::Empty { occupant, .. } | Cell::Nest { occupant, .. } = cell {
+                *mark = false;
                 *occupant = None
             }
-        }
-    }
-
-    fn occupied(&self, cell: (usize, usize)) -> bool {
-        // Checks whether what we want to check is in bounds or not
-        if cell.0 >= self.size.0 || cell.1 >= self.size.1 {
-            return true;
-        }
-        match &self[cell] {
-            Cell::Empty { occupant, .. } | Cell::Nest { occupant, .. } => occupant.is_some(),
-            _ => true,
         }
     }
 
@@ -555,11 +584,18 @@ impl Map {
     // Returns a set of vertices representing the entire map
     // as one model
     pub fn render(
-        &self,
+        &mut self,
+        pov: Pov,
         renderer: &mut RenderingEngine,
+        tile_model_handle: ResourceHandle,
         food_model_handle: ResourceHandle,
         resource_handler: &ResourceHandler,
     ) {
+        // Check if we need to change pov
+        if pov != self.rendered_pov {
+            self.change_model_pov(pov, tile_model_handle, &resource_handler);
+        }
+
         // First batch render the entire map
         renderer.add_model(
             &self.vertices,
@@ -615,6 +651,47 @@ impl Map {
                     }
                 }
             }
+        }
+    }
+
+
+    fn change_model_pov(&mut self, pov: Pov, tile_model_handle: ResourceHandle, resource_handler: &ResourceHandler) {
+        let (mut x, mut y) = (0, 0);
+        let mut new_vertices = Vec::with_capacity(self.vertices.len());
+        for cell in self.cells.iter() {
+            let mut render_position = Simulation::render_position((x, y));
+            render_position.y = if matches!(cell, Cell::Obstacle) {
+                0.2
+            } else {
+                -HEXAGON_RADIUS / 2_f32 - 0.2
+            };
+
+            // We add the translated vertices of the hexagon model to the batch of vertices
+            // that composes our map
+            for vertex in resource_handler
+                .models
+                .fetch_model_vertices(&tile_model_handle)
+            {
+                let mut modified = *vertex;
+                modified.translate(&render_position);
+                modified.colour = cell.colour(pov);
+                new_vertices.push(modified);
+            }
+
+            x += 1;
+            if x % self.size.0 == 0 {
+                y += 1;
+                x = 0
+            }
+        }
+        self.vertices = new_vertices;
+        self.rendered_pov = pov;
+    }
+
+    fn change_cell_colour(&mut self, position: (usize, usize), colour: [f32; 3]) {
+        let offset = self.position_to_index(position) * (self.cells.len() / self.vertices.len());
+        for i in 0..self.cells.len() / self.vertices.len() {
+            self.vertices[offset + i].colour = colour;
         }
     }
 }

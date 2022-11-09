@@ -11,6 +11,7 @@ use winit::dpi::PhysicalPosition;
 use winit::event::KeyboardInput;
 use winit::event::{DeviceEvent, ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+use crate::simulation::Pov;
 
 const DEFAULT_TICKS: usize = 100000;
 
@@ -38,6 +39,8 @@ pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
 
     let mut last_frame_t = Instant::now();
     let mut frame_count = 0;
+
+    let mut current_pov = Pov::Both;
 
     // Main loop
     event_loop.run(move |event, _, control_flow| match event {
@@ -85,7 +88,9 @@ pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
                         103 => tps *= 2,           // Keyboard up
                         108 => tps /= 2,           // Keyboard down
                         57 => sim_running ^= true, // spacebar
-                        _ => (),
+                        48 => current_pov = if current_pov == Pov::BlackAnts { Pov::Both } else { Pov::BlackAnts }, // b
+                        19 => current_pov = if current_pov == Pov::RedAnts { Pov::Both } else { Pov::RedAnts }, // r
+                        _ => println!("{:?}", scancode),
                     }
                 }
                 _ => (),
@@ -120,7 +125,7 @@ pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
             };
 
             // We then render our simulation state using the interpolation ratio
-            simulation.render(interpolation_ratio, &mut rendering_engine);
+            simulation.render(interpolation_ratio, current_pov, &mut rendering_engine);
             frame_count += 1;
             if last_frame_t.elapsed().as_secs() >= 1 {
                 println!("fps: {}", frame_count);

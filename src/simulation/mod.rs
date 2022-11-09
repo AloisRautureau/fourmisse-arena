@@ -5,15 +5,13 @@ pub mod map;
 use crate::rendering_engine::{
     LightSource, Material, RenderingEngine, ResourceHandle, ResourceHandler, ResourceVec,
 };
-use crate::simulation::ant::Ant;
+use crate::simulation::ant::Colour;
 use crate::simulation::instruction::load_instructionset;
-use crate::simulation::map::{AntRef, Cell};
+use crate::simulation::map::AntRef;
 use instruction::InstructionSet;
 use map::Map;
 use nalgebra_glm::{identity, make_vec3, pi, rotate, translate, vec3, vec3_to_vec4, TVec3};
-use std::borrow::{Borrow, BorrowMut};
-use std::cell::RefCell;
-use std::rc::Rc;
+pub use map::Pov;
 
 const HEXAGON_RADIUS: f32 = 1_f32;
 const HEXAGON_HEIGHT: f32 = 2_f32 * HEXAGON_RADIUS;
@@ -23,7 +21,6 @@ const HEXAGON_WIDTH: f32 = 1.732050807568 * HEXAGON_RADIUS; // 3_f32.sqrt() * HE
 const MAX_SIMULATION_TIME: u32 = 60 * 60 * 24;
 const NOON_THRESHOLD: u32 = MAX_SIMULATION_TIME / 2;
 const EVENING_THRESHOLD: u32 = 2 * MAX_SIMULATION_TIME / 3;
-const NIGHT_THRESHOLD: u32 = 0;
 const NOON_LIGHTING: LightSource = LightSource {
     vector: [0f32; 4],
     color: [1f32; 3],
@@ -44,7 +41,9 @@ pub struct Simulation {
     instructions: [InstructionSet; 2],
     in_simulation_time: u32, // MAX 86400, time in seconds per day
     resource_handler: ResourceHandler,
-    ant_model_handle: ResourceHandle,
+    tile_model_handle: ResourceHandle,
+    red_ant_model_handle: ResourceHandle,
+    black_ant_model_handle: ResourceHandle,
     food_model_handle: ResourceHandle,
 }
 impl Simulation {
@@ -52,7 +51,14 @@ impl Simulation {
     pub fn new(map_path: &str, red_brain_path: &str, black_brain_path: &str) -> Self {
         // Load up resources
         let mut resource_handler = ResourceHandler::default();
-        let ant_model = resource_handler.models.load("assets/ant.obj");
+        let red_ant_model = resource_handler.models.load("assets/ant.obj");
+        resource_handler
+            .models
+            .set_colour(&red_ant_model, Colour::Red.rgb());
+        let black_ant_model = resource_handler.models.load("assets/ant.obj");
+        resource_handler
+            .models
+            .set_colour(&black_ant_model, Colour::Black.rgb());
         let food_model = resource_handler.models.load("assets/food.obj");
         resource_handler
             .models
@@ -71,7 +77,9 @@ impl Simulation {
             resource_handler,
 
             in_simulation_time: MAX_SIMULATION_TIME / 2,
-            ant_model_handle: ant_model,
+            tile_model_handle: hexagon_model,
+            red_ant_model_handle: red_ant_model,
+            black_ant_model_handle: black_ant_model,
             food_model_handle: food_model,
         }
     }
@@ -100,19 +108,20 @@ impl Simulation {
 
     // Renders the next frame of the simulation, given an interpolation ratio
     // to avoid stuttering
-    pub fn render(&mut self, interpolation_ratio: f32, renderer: &mut RenderingEngine) {
+    pub fn render(&mut self, interpolation_ratio: f32, pov: Pov, renderer: &mut RenderingEngine) {
         renderer.begin();
         self.map
-            .render(renderer, self.food_model_handle, &self.resource_handler);
+            .render(pov, renderer, self.tile_model_handle, self.food_model_handle, &self.resource_handler);
 
         // Render each ant
         for ant_ref in self.ants.iter_mut() {
-            let mut ant = &mut ant_ref.lock().unwrap();
+            let ant = &mut ant_ref.lock().unwrap();
 
             ant.interpolate_state(interpolation_ratio);
+            let ant_model_handle = if ant.colour == Colour::Red { self.red_ant_model_handle } else { self.black_ant_model_handle };
             ant.render(
                 renderer,
-                self.ant_model_handle,
+                ant_model_handle,
                 self.food_model_handle,
                 &self.resource_handler,
             );
@@ -125,7 +134,7 @@ impl Simulation {
         self.map.render_light(renderer);
         // Light emanating from ants
         for ant_ref in self.ants.iter_mut() {
-            let mut ant = &mut ant_ref.lock().unwrap();
+            let ant = &mut ant_ref.lock().unwrap();
             ant.render_light(renderer);
         }
 
