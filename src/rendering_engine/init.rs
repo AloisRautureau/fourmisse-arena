@@ -312,12 +312,13 @@ impl super::RenderingEngine {
             });
 
         // Framebuffer creation
-        let (framebuffers, vertex_color_buffer, normal_buffer, frag_pos_buffer, specular_buffer) = window_size_dependent_setup(
-            device.clone(),
-            &images,
-            render_pass.clone(),
-            &mut viewport,
-        );
+        let (framebuffers, vertex_color_buffer, normal_buffer, frag_pos_buffer, specular_buffer) =
+            window_size_dependent_setup(
+                device.clone(),
+                &images,
+                render_pass.clone(),
+                &mut viewport,
+            );
 
         let previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>);
 
@@ -335,7 +336,7 @@ impl super::RenderingEngine {
 
         let mut vp_matrix = ViewProjection::default();
         let dimensions: [f32; 2] = surface.window().inner_size().into();
-        vp_matrix.projection = perspective(dimensions[0] / dimensions[1], 90.0, 0.01, 100.0);
+        vp_matrix.projection = perspective(dimensions[0] / dimensions[1], 90.0, 0.01, 1024.0);
         let vp_buffer = CpuAccessibleBuffer::from_data(
             device.clone(),
             BufferUsage {
@@ -374,9 +375,10 @@ impl super::RenderingEngine {
             CpuBufferPool::<deferred_vertex_shader::ty::Model>::uniform_buffer(device.clone());
         let material_buffer_pool =
             CpuBufferPool::<deferred_fragment_shader::ty::Material>::uniform_buffer(device.clone());
-        let directional_buffer_pool = CpuBufferPool::<
-            directional_fragment_shader::ty::LightSource,
-        >::uniform_buffer(device.clone());
+        let directional_buffer_pool =
+            CpuBufferPool::<directional_fragment_shader::ty::LightSource>::uniform_buffer(
+                device.clone(),
+            );
 
         Self {
             _instance: instance,
@@ -406,7 +408,6 @@ impl super::RenderingEngine {
             vp_matrix,
             viewport,
 
-            bound_model_handle: None,
             previous_frame_end,
             render_stage: RenderStage::Stopped,
             commands: None,
@@ -432,43 +433,48 @@ pub fn window_size_dependent_setup(
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
     let depth_buffer = ImageView::new_default(
-        AttachmentImage::transient(
-            device.clone(),
-            dimensions,
-            Format::D32_SFLOAT_S8_UINT
-        ).unwrap(),
-    ).unwrap();
+        AttachmentImage::transient(device.clone(), dimensions, Format::D32_SFLOAT_S8_UINT).unwrap(),
+    )
+    .unwrap();
 
     let vertex_color_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             device.clone(),
             dimensions,
             Format::A2B10G10R10_UNORM_PACK32,
-        ).unwrap(),
-    ).unwrap();
+        )
+        .unwrap(),
+    )
+    .unwrap();
 
     let normal_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             device.clone(),
             dimensions,
             Format::R16G16B16A16_SFLOAT,
-        ).unwrap(),
-    ).unwrap();
+        )
+        .unwrap(),
+    )
+    .unwrap();
 
     let frag_pos_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             device.clone(),
             dimensions,
-            Format::R16G16B16A16_SFLOAT
-        ).unwrap()
-    ).unwrap();
+            Format::R16G16B16A16_SFLOAT,
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let specular_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             device.clone(),
             dimensions,
-            Format::R16G16_SFLOAT
-        ).unwrap()
-    ).unwrap();
+            Format::R16G16_SFLOAT,
+        )
+        .unwrap(),
+    )
+    .unwrap();
 
     let framebuffers = images
         .iter()
@@ -493,5 +499,11 @@ pub fn window_size_dependent_setup(
         .collect::<Vec<_>>();
 
     // We also need to return our attachments' buffers
-    (framebuffers, vertex_color_buffer, normal_buffer, frag_pos_buffer, specular_buffer)
+    (
+        framebuffers,
+        vertex_color_buffer,
+        normal_buffer,
+        frag_pos_buffer,
+        specular_buffer,
+    )
 }

@@ -70,9 +70,8 @@ pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
                     rendering_engine.move_camera(&(vec4_to_vec3(&translation) / 10_f32))
                 }
                 DeviceEvent::MouseWheel { delta } => match delta {
-                    MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
-                        rendering_engine.move_camera(&(vec3(y as f32, y as f32, y as f32) / 100_f32))
-                    }
+                    MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => rendering_engine
+                        .move_camera(&(vec3(y as f32, y as f32, y as f32) / 100_f32)),
                     MouseScrollDelta::LineDelta(_, y) => {
                         rendering_engine.move_camera(&(vec3(y as f32, y as f32, y as f32) / 10_f32))
                     }

@@ -5,13 +5,14 @@ use std::io::{BufRead, BufReader};
 pub struct ObjLoader {
     vertices: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
+    colour: [f32; 3],
     _text: Vec<[f32; 3]>,
     faces: Vec<RawFace>,
 
     _invert_winding: bool,
 }
 impl ObjLoader {
-    pub fn load(path: &str, invert_winding: bool) -> ObjLoader {
+    pub fn load(path: &str, colour: Option<[f32; 3]>, invert_winding: bool) -> ObjLoader {
         let f = File::open(path)
             .unwrap_or_else(|err| panic!("failed to open file {}: {:?}", path, err));
         let bufreader = BufReader::new(f);
@@ -38,6 +39,7 @@ impl ObjLoader {
             normals,
             _text: text,
             faces,
+            colour: colour.unwrap_or([1f32; 3]),
 
             _invert_winding: invert_winding,
         }
@@ -54,14 +56,17 @@ impl ObjLoader {
                     Vertex {
                         position: *self.vertices.get(vertex_indices[0]).unwrap(),
                         normal: *self.normals.get(normal_indices[0]).unwrap(),
+                        colour: self.colour,
                     },
                     Vertex {
                         position: *self.vertices.get(vertex_indices[1]).unwrap(),
                         normal: *self.normals.get(normal_indices[1]).unwrap(),
+                        colour: self.colour,
                     },
                     Vertex {
                         position: *self.vertices.get(vertex_indices[2]).unwrap(),
                         normal: *self.normals.get(normal_indices[2]).unwrap(),
+                        colour: self.colour,
                     },
                 ]
             })

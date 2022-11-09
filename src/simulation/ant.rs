@@ -1,10 +1,15 @@
 use super::instruction::{Instruction, Instruction::*, InstructionSet};
 use super::map::Map;
-use crate::rendering_engine::{LightSource, Material, RenderingEngine, ResourceHandle, ResourceHandler};
+use crate::rendering_engine::{
+    LightSource, Material, RenderingEngine, ResourceHandle, ResourceHandler,
+};
 use crate::simulation::instruction::{SenseDirection, TurnDirection};
 use crate::simulation::map::AntRef;
 use crate::simulation::{Simulation, HEXAGON_HEIGHT, HEXAGON_RADIUS, HEXAGON_WIDTH};
-use nalgebra_glm::{identity, inverse_transpose, pi, rotate_normalized_axis, translate, vec3, TMat4, TVec3, vec3_to_vec4, make_vec3};
+use nalgebra_glm::{
+    identity, inverse_transpose, make_vec3, pi, rotate_normalized_axis, translate, vec3,
+    vec3_to_vec4, TMat4, TVec3,
+};
 use rand::Rng;
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -125,9 +130,8 @@ impl Ant {
             cooldown: 0,
 
             material: Material {
-                colour: colour.rgb(),
                 shininess: 128.0,
-                specular_intensity: 1.0
+                specular_intensity: 1.0,
             },
             render_pos: Simulation::render_position(position),
             render_rot: CardinalDirection::default().as_angle(),
@@ -247,8 +251,9 @@ impl Ant {
         resource_handler: &ResourceHandler,
     ) {
         renderer.add_model(
-            ant_model_handle,
-            resource_handler,
+            resource_handler
+                .models
+                .fetch_model_vertices(&ant_model_handle),
             self.model_matrices(),
             &self.material,
         );
@@ -259,7 +264,7 @@ impl Ant {
                 food_model_handle,
                 resource_handler,
                 self.render_pos + vec3(0f32, 0.3, 0f32),
-                self.render_rot
+                self.render_rot,
             )
         }
     }

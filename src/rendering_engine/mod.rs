@@ -8,13 +8,13 @@ mod resource_handler;
 mod shaders;
 mod view_projection;
 
-use std::convert::Into;
 pub use lights::*;
 pub use materials::Material;
 pub use model::vertex::*;
 pub use model::Model;
 pub use resource_handler::{ResourceHandle, ResourceHandler, ResourceVec};
 pub use shaders::*;
+use std::convert::Into;
 pub use view_projection::ViewProjection;
 
 use nalgebra_glm::TVec3;
@@ -81,7 +81,6 @@ pub struct RenderingEngine {
     viewport: Viewport,
 
     // Variables used during rendering
-    bound_model_handle: Option<ResourceHandle>,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
     pub render_stage: RenderStage,
     commands: Option<

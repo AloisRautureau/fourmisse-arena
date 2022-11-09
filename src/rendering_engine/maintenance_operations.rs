@@ -22,13 +22,18 @@ impl super::RenderingEngine {
         };
 
         self.swapchain = new_swapchain;
-        let (new_framebuffers, new_vertex_color_buffer, new_normal_buffer, new_frag_pos_buffer, new_specular_buffer) =
-            super::init::window_size_dependent_setup(
-                self.device.clone(),
-                &new_images,
-                self.render_pass.clone(),
-                &mut self.viewport,
-            );
+        let (
+            new_framebuffers,
+            new_vertex_color_buffer,
+            new_normal_buffer,
+            new_frag_pos_buffer,
+            new_specular_buffer,
+        ) = super::init::window_size_dependent_setup(
+            self.device.clone(),
+            &new_images,
+            self.render_pass.clone(),
+            &mut self.viewport,
+        );
         self.framebuffers = new_framebuffers;
         self.vertex_color_buffer = new_vertex_color_buffer;
         self.normal_buffer = new_normal_buffer;
@@ -38,7 +43,7 @@ impl super::RenderingEngine {
 
     fn recreate_vp(&mut self) {
         let dimensions: [f32; 2] = self.surface.window().inner_size().into();
-        self.vp_matrix.projection = perspective(dimensions[0] / dimensions[1], 100.0, 0.01, 100.0);
+        self.vp_matrix.projection = perspective(dimensions[0] / dimensions[1], 100.0, 0.01, 1024.0);
         self.vp_buffer = CpuAccessibleBuffer::from_data(
             self.device.clone(),
             BufferUsage {

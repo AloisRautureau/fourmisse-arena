@@ -1,6 +1,10 @@
 use crate::rendering_engine::materials::Material;
 use crate::rendering_engine::resource_handler::ResourceHandler;
-use crate::rendering_engine::{deferred_fragment_shader, deferred_vertex_shader, LightSource, RenderStage, RenderingEngine, ResourceHandle, directional_fragment_shader};
+use crate::rendering_engine::{
+    deferred_fragment_shader, deferred_vertex_shader, directional_fragment_shader, LightSource,
+    RenderStage, RenderingEngine, ResourceHandle,
+};
+use crate::Vertex;
 use nalgebra_glm::TMat4;
 use std::mem;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess};
@@ -49,13 +53,13 @@ impl RenderingEngine {
             Err(err) => panic!("could not start rendering frame: {:?}", err),
         };
 
-        let clear_values =  vec![
+        let clear_values = vec![
             Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Final colour
             Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Vertex colour,
             Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Normals,
             Some(ClearValue::Float([0f32, 0f32, 0f32, 1f32])), // Fragment position,
-            Some(ClearValue::from([0f32; 2])), // Specular light
-            Some(ClearValue::DepthStencil((1f32, 0))) // Depth stencil
+            Some(ClearValue::from([0f32; 2])),                 // Specular light
+            Some(ClearValue::DepthStencil((1f32, 0))),         // Depth stencil
         ];
         let mut commands = AutoCommandBufferBuilder::primary(
             self.device.clone(),
@@ -79,8 +83,7 @@ impl RenderingEngine {
     // Adds a model to our world
     pub fn add_model(
         &mut self,
-        model_handle: ResourceHandle,
-        resource_handler: &ResourceHandler,
+        vertices: &Vec<Vertex>,
         model_transforms: (TMat4<f32>, TMat4<f32>),
         material: &Material,
     ) {
@@ -106,9 +109,9 @@ impl RenderingEngine {
         };
         let material_buffer = {
             let uniform_data = deferred_fragment_shader::ty::Material {
-                color: material.colour,
+                //color: material.colour,
                 shininess: material.shininess,
-                spec_intensity: material.specular_intensity
+                spec_intensity: material.specular_intensity,
             };
             self.material_buffer_pool
                 .from_data(uniform_data)
@@ -140,35 +143,20 @@ impl RenderingEngine {
                 (self.vp_descriptor_set.clone(), model_descriptor_set),
             );
         // If we try to render a set of vertices which are not yet bound, we must prepare a buffer and bind them
-        if self.bound_model_handle != Some(model_handle) {
-            let vertex_buffer = CpuAccessibleBuffer::from_iter(
-                self.device.clone(),
-                BufferUsage {
-                    vertex_buffer: true,
-                    ..Default::default()
-                },
-                false,
-                resource_handler
-                    .models
-                    .fetch_model_vertices(&model_handle)
-                    .iter()
-                    .cloned(),
-            )
-            .unwrap_or_else(|err| panic!("failed to create vertex buffer: {:?}", err));
-            self.bound_model_handle = Some(model_handle);
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            self.device.clone(),
+            BufferUsage {
+                vertex_buffer: true,
+                ..Default::default()
+            },
+            false,
+            vertices.iter().cloned(),
+        )
+        .unwrap_or_else(|err| panic!("failed to create vertex buffer: {:?}", err));
 
-            commands.bind_vertex_buffers(0, vertex_buffer.clone());
-        }
+        commands.bind_vertex_buffers(0, vertex_buffer.clone());
         commands
-            .draw(
-                resource_handler
-                    .models
-                    .fetch_model_vertices(&model_handle)
-                    .len() as u32,
-                1,
-                0,
-                0,
-            )
+            .draw(vertices.len() as u32, 1, 0, 0)
             .unwrap_or_else(|err| panic!("failed to bind vertex buffer: {:?}", err));
         self.commands = Some(commands)
     }
@@ -230,13 +218,14 @@ impl RenderingEngine {
             self.device.clone(),
             BufferUsage {
                 uniform_buffer: true,
-                .. Default::default()
+                ..Default::default()
             },
             false,
             directional_fragment_shader::ty::Camera {
-                position: self.vp_matrix.camera_position.into()
-            }
-        ).unwrap();
+                position: self.vp_matrix.camera_position.into(),
+            },
+        )
+        .unwrap();
 
         let directional_buffer =
             directional_light.generate_directional_buffer(&self.directional_buffer_pool);
@@ -255,9 +244,10 @@ impl RenderingEngine {
                 WriteDescriptorSet::image_view(2, self.frag_pos_buffer.clone()),
                 WriteDescriptorSet::image_view(3, self.specular_buffer.clone()),
                 WriteDescriptorSet::buffer(4, camera_buffer.clone()),
-                WriteDescriptorSet::buffer(5, directional_buffer.clone())
+                WriteDescriptorSet::buffer(5, directional_buffer.clone()),
             ],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Adding to our command queue
         let mut commands = self.commands.take().unwrap();

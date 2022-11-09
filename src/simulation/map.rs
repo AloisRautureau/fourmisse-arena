@@ -1,19 +1,15 @@
 use super::ant::{Ant, Colour};
-use std::borrow::Borrow;
-use std::cell::RefCell;
-use std::cmp::{min};
+use std::cmp::min;
 use std::fmt::{Debug, Formatter};
 
-use crate::rendering_engine::{
-    Material, Model, RenderingEngine, ResourceHandle, ResourceHandler, Vertex,
-};
+use crate::rendering_engine::{Material, RenderingEngine, ResourceHandle, ResourceHandler};
 use crate::simulation::instruction::Cond;
 use crate::simulation::{Simulation, HEXAGON_HEIGHT, HEXAGON_RADIUS, HEXAGON_WIDTH};
-use nalgebra_glm::{identity, inverse_transpose, make_vec4, translate, vec3, vec3_to_vec4, vec4_to_vec3, TMat4, pi};
+use crate::Vertex;
+use nalgebra_glm::{identity, inverse_transpose, pi, translate, trunc, vec3, TMat4};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::ops::{Index, IndexMut};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 pub type AntRef = Arc<Mutex<Ant>>;
@@ -38,20 +34,28 @@ impl Cell {
     pub fn material(&self) -> Material {
         match self {
             Self::Empty { .. } => Material {
-                colour: [0.5961, 0.5922, 0.1020],
+                // colour: [0.5961, 0.5922, 0.1020],
                 shininess: 32.0,
-                specular_intensity: 1.0
+                specular_intensity: 1.0,
             },
             Self::Nest { colour, .. } => Material {
-                colour: colour.rgb(),
+                // colour: colour.rgb(),
                 shininess: 32.0,
-                specular_intensity: 1.0
+                specular_intensity: 1.0,
             },
             Self::Obstacle => Material {
-                colour: [0.4098, 0.1627, 0.0],
+                // colour: [0.4098, 0.1627, 0.0],
                 shininess: 32.0,
-                specular_intensity: 1.0
+                specular_intensity: 1.0,
             },
+        }
+    }
+
+    pub fn colour(&self) -> [f32; 3] {
+        match self {
+            Self::Empty { .. } => [0.5961, 0.5922, 0.1020],
+            Self::Nest { colour, .. } => colour.rgb(),
+            Self::Obstacle => [0.4098, 0.1627, 0.0],
         }
     }
 }
@@ -61,18 +65,24 @@ impl Cell {
 pub struct Map {
     cells: Vec<Cell>,
     kill_marks: Vec<bool>,
-    transform_matrices: Vec<(TMat4<f32>, TMat4<f32>)>,
+    vertices: Vec<Vertex>,
+    model_matrices: Vec<TMat4<f32>>,
     pub size: (usize, usize),
 }
 impl Map {
     // Loads a map from a file
     // Returns loaded map, as well as a vector of ants derived from it
-    pub fn load_file(path: &str) -> (Self, Vec<AntRef>) {
+    pub fn load_file(
+        path: &str,
+        tile_mode_handle: ResourceHandle,
+        resource_handler: &ResourceHandler,
+    ) -> (Self, Vec<AntRef>) {
         let mut ants = vec![];
         let mut map = Self {
             cells: Vec::new(),
             kill_marks: Vec::new(),
-            transform_matrices: Vec::new(),
+            vertices: Vec::new(),
+            model_matrices: Vec::new(),
             size: (0, 0),
         };
 
@@ -185,9 +195,20 @@ impl Map {
                     } else {
                         -HEXAGON_RADIUS / 2_f32 - 0.2
                     };
-                    let model_matrix = translate(&identity(), &render_position);
-                    let normals_matrix = inverse_transpose(model_matrix);
-                    map.transform_matrices.push((model_matrix, normals_matrix));
+
+                    // We add the translated vertices of the hexagon model to the batch of vertices
+                    // that composes our map
+                    for vertex in resource_handler
+                        .models
+                        .fetch_model_vertices(&tile_mode_handle)
+                    {
+                        let mut modified = *vertex;
+                        modified.translate(&render_position);
+                        modified.colour = map.cells.last().unwrap().colour();
+                        map.vertices.push(modified)
+                    }
+                    map.model_matrices
+                        .push(translate(&identity(), &render_position));
 
                     x += 1
                 }
@@ -235,12 +256,19 @@ impl Map {
         }
     }
 
-    pub fn move_to(&mut self, moving_colour: Colour, from: (usize, usize), to: (usize, usize)) -> bool {
+    pub fn move_to(
+        &mut self,
+        moving_colour: Colour,
+        from: (usize, usize),
+        to: (usize, usize),
+    ) -> bool {
         if self.occupied(to) {
             false
         } else {
             // Take the ant from the source cell
-            let ant = if let Cell::Empty { occupant, .. } | Cell::Nest { occupant, .. } = &mut self[from] {
+            let ant = if let Cell::Empty { occupant, .. } | Cell::Nest { occupant, .. } =
+                &mut self[from]
+            {
                 occupant.take()
             } else {
                 None
@@ -261,21 +289,43 @@ impl Map {
     // This lets us check after every move, setting the destination of the move as the start point
     fn mark_killed_ants(&mut self, colour: Colour, position: (usize, usize)) {
         let mut surrounding_enemies = 0;
-        let mut to_check_after = vec!();
+        let mut to_check_after = vec![];
 
-        if let Cell::Empty { occupant: Some(ant_ref), .. } | Cell::Nest { occupant: Some(ant_ref), .. } = &self[position] {
+        if let Cell::Empty {
+            occupant: Some(ant_ref),
+            ..
+        }
+        | Cell::Nest {
+            occupant: Some(ant_ref),
+            ..
+        } = &self[position]
+        {
             let surrounding_cells = self.surroundings(position);
 
             let mut last_ally = -1;
             let mut ennemies_since_last_ally = 0;
             for (i, (cell, _)) in surrounding_cells.iter().enumerate() {
-                if let Cell::Empty { occupant: Some(other_ant_ref), .. } | Cell::Nest { occupant: Some(other_ant_ref), .. } = cell {
-                    let other_ant_colour = if let Ok(a) = other_ant_ref.try_lock() { a.colour } else { colour.opposite() };
+                if let Cell::Empty {
+                    occupant: Some(other_ant_ref),
+                    ..
+                }
+                | Cell::Nest {
+                    occupant: Some(other_ant_ref),
+                    ..
+                } = cell
+                {
+                    let other_ant_colour = if let Ok(a) = other_ant_ref.try_lock() {
+                        a.colour
+                    } else {
+                        colour.opposite()
+                    };
                     if other_ant_colour == colour {
-                        if (last_ally == 2 && ennemies_since_last_ally == 1) || (last_ally == 3 && ennemies_since_last_ally == 2) {
+                        if (last_ally == 2 && ennemies_since_last_ally == 1)
+                            || (last_ally == 3 && ennemies_since_last_ally == 2)
+                        {
                             // In this configuration, an enemy ant might be captured, so we must check
                             // using them as starting points
-                            for j in i - ennemies_since_last_ally .. i {
+                            for j in i - ennemies_since_last_ally..i {
                                 to_check_after.push(surrounding_cells[j].1)
                             }
                         }
@@ -301,7 +351,10 @@ impl Map {
         }
     }
     pub fn cleanup_killed_ants(&mut self) {
-        let marked_cells = self.cells.iter_mut().zip(&self.kill_marks)
+        let marked_cells = self
+            .cells
+            .iter_mut()
+            .zip(&self.kill_marks)
             .filter_map(|(c, m)| if *m { Some(c) } else { None });
         for cell in marked_cells {
             if let Cell::Empty { occupant, .. } | Cell::Nest { occupant, .. } = cell {
@@ -330,55 +383,104 @@ impl Map {
         // Checks whether what we want to check is in bounds or not
         assert!(cell.0 < self.size.0 && cell.1 < self.size.1);
         match condition {
-            Cond::Friend => if let Cell::Empty { occupant: Some(ant), .. } | Cell::Nest { occupant: Some(ant), .. } = &self[cell] {
-                ant.lock().unwrap().colour == perspective
-
-            } else {
-                false
-            },
-            Cond::Foe => if let Cell::Empty { occupant: Some(ant), .. } | Cell::Nest { occupant: Some(ant), .. } = &self[cell] {
-                ant.lock().unwrap().colour != perspective
-            } else {
-                false
-            },
-            Cond::FriendWithFood => if let Cell::Empty { occupant: Some(ant), .. } | Cell::Nest { occupant: Some(ant), .. } = &self[cell] {
-                let ant = ant.lock().unwrap();
-                ant.colour == perspective && ant.has_food
-            } else {
-                false
-            },
-            Cond::FoeWithFood => if let Cell::Empty { occupant: Some(ant), .. } | Cell::Nest { occupant: Some(ant), .. } = &self[cell] {
-                let ant = ant.lock().unwrap();
-                ant.colour != perspective && ant.has_food
-            } else {
-                false
-            },
-            Cond::Food => if let Cell::Empty { food, .. } | Cell::Nest { food, .. } = self[cell] {
-                food != 0
-            } else {
-                false
-            },
+            Cond::Friend => {
+                if let Cell::Empty {
+                    occupant: Some(ant),
+                    ..
+                }
+                | Cell::Nest {
+                    occupant: Some(ant),
+                    ..
+                } = &self[cell]
+                {
+                    ant.lock().unwrap().colour == perspective
+                } else {
+                    false
+                }
+            }
+            Cond::Foe => {
+                if let Cell::Empty {
+                    occupant: Some(ant),
+                    ..
+                }
+                | Cell::Nest {
+                    occupant: Some(ant),
+                    ..
+                } = &self[cell]
+                {
+                    ant.lock().unwrap().colour != perspective
+                } else {
+                    false
+                }
+            }
+            Cond::FriendWithFood => {
+                if let Cell::Empty {
+                    occupant: Some(ant),
+                    ..
+                }
+                | Cell::Nest {
+                    occupant: Some(ant),
+                    ..
+                } = &self[cell]
+                {
+                    let ant = ant.lock().unwrap();
+                    ant.colour == perspective && ant.has_food
+                } else {
+                    false
+                }
+            }
+            Cond::FoeWithFood => {
+                if let Cell::Empty {
+                    occupant: Some(ant),
+                    ..
+                }
+                | Cell::Nest {
+                    occupant: Some(ant),
+                    ..
+                } = &self[cell]
+                {
+                    let ant = ant.lock().unwrap();
+                    ant.colour != perspective && ant.has_food
+                } else {
+                    false
+                }
+            }
+            Cond::Food => {
+                if let Cell::Empty { food, .. } | Cell::Nest { food, .. } = self[cell] {
+                    food != 0
+                } else {
+                    false
+                }
+            }
             Cond::Rock => matches!(self[cell], Cell::Obstacle),
-            Cond::Marker(i) => if let Cell::Empty { markers, .. } | Cell::Nest { markers, .. } = self[cell] {
-                markers[perspective.as_index()] & (1 << i) != 0
-            } else {
-                false
-            },
-            Cond::FoeMarker => if let Cell::Empty { markers, .. } | Cell::Nest { markers, .. } = self[cell] {
-                markers[perspective.opposite().as_index()] != 0
-            } else {
-                false
-            },
-            Cond::Home => if let Cell::Nest { colour, .. } = self[cell] {
-                colour == perspective
-            } else {
-                false
-            },
-            Cond::FoeHome => if let Cell::Nest { colour, .. } = self[cell] {
-                colour != perspective
-            } else {
-                false
-            },
+            Cond::Marker(i) => {
+                if let Cell::Empty { markers, .. } | Cell::Nest { markers, .. } = self[cell] {
+                    markers[perspective.as_index()] & (1 << i) != 0
+                } else {
+                    false
+                }
+            }
+            Cond::FoeMarker => {
+                if let Cell::Empty { markers, .. } | Cell::Nest { markers, .. } = self[cell] {
+                    markers[perspective.opposite().as_index()] != 0
+                } else {
+                    false
+                }
+            }
+            Cond::Home => {
+                if let Cell::Nest { colour, .. } = self[cell] {
+                    colour == perspective
+                } else {
+                    false
+                }
+            }
+            Cond::FoeHome => {
+                if let Cell::Nest { colour, .. } = self[cell] {
+                    colour != perspective
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -406,24 +508,37 @@ impl Map {
     // Given a position, returns the state of the six surrounding cells clockwise starting from the
     // easter position, as well as their position
     pub fn surroundings(&self, position: (usize, usize)) -> [(&Cell, (usize, usize)); 6] {
-        assert!(position.0 < self.size.0 - 1 && position.0 > 0 && position.1 > 0 && position.1 < self.size.1 - 1);
+        assert!(
+            position.0 < self.size.0 - 1
+                && position.0 > 0
+                && position.1 > 0
+                && position.1 < self.size.1 - 1
+        );
         let (x, y) = position;
 
         [
             (&self[(x + 1, y)], (x + 1, y)),
-            (&self[(x + 1, y - 1)], (x + 1, y -1)),
+            (&self[(x + 1, y - 1)], (x + 1, y - 1)),
             (&self[(x - 1, y - 1)], (x - 1, y - 1)),
             (&self[(x - 1, y)], (x - 1, y)),
             (&self[(x - 1, y + 1)], (x - 1, y + 1)),
-            (&self[(x + 1, y + 1)], (x + 1, y + 1))
+            (&self[(x + 1, y + 1)], (x + 1, y + 1)),
         ]
     }
 
     // Returns a vector of AntRef containing the ants currently on the map
     pub fn ants(&self) -> Vec<AntRef> {
-        let mut ants = vec!();
+        let mut ants = vec![];
         for cell in &self.cells {
-            if let Cell::Empty { occupant: Some(ant), .. } | Cell::Nest { occupant: Some(ant), .. } = cell {
+            if let Cell::Empty {
+                occupant: Some(ant),
+                ..
+            }
+            | Cell::Nest {
+                occupant: Some(ant),
+                ..
+            } = cell
+            {
                 ants.push(ant.clone())
             }
         }
@@ -442,24 +557,29 @@ impl Map {
     pub fn render(
         &self,
         renderer: &mut RenderingEngine,
-        tile_model_handle: ResourceHandle,
         food_model_handle: ResourceHandle,
         resource_handler: &ResourceHandler,
     ) {
-        for (cell, (model, normal)) in self.cells.iter().zip(&self.transform_matrices) {
-            renderer.add_model(
-                tile_model_handle,
-                resource_handler,
-                (*model, *normal),
-                &cell.material(),
-            );
+        // First batch render the entire map
+        renderer.add_model(
+            &self.vertices,
+            (identity(), identity()),
+            &Cell::Obstacle.material(),
+        );
 
+        for (cell, model) in self.cells.iter().zip(&self.model_matrices) {
             if let Cell::Empty { food, .. } | Cell::Nest { food, .. } = cell {
                 if *food > 0 {
                     let base_y = model.m24 + 0.075 + HEXAGON_RADIUS / 2f32;
-                    Simulation::render_food_piece(renderer, food_model_handle, resource_handler, vec3(model.m14, base_y, model.m34), 0f32);
+                    Simulation::render_food_piece(
+                        renderer,
+                        food_model_handle,
+                        resource_handler,
+                        vec3(model.m14, base_y, model.m34),
+                        0f32,
+                    );
                     let rotation = pi::<f32>() / 3f32;
-                    for i in 0..min(*food - 1, 5) {
+                    for i in 0..min(food - 1, 5) {
                         Simulation::render_food_piece(
                             renderer,
                             food_model_handle,
@@ -467,9 +587,9 @@ impl Map {
                             vec3(
                                 model.m14 + (rotation * i as f32).cos() * HEXAGON_WIDTH / 4f32,
                                 base_y,
-                                model.m34 + (rotation * i as f32).sin() * HEXAGON_HEIGHT / 4f32
+                                model.m34 + (rotation * i as f32).sin() * HEXAGON_HEIGHT / 4f32,
                             ),
-                            0f32
+                            0f32,
                         )
                     }
                 }
@@ -477,7 +597,7 @@ impl Map {
         }
     }
     pub fn render_light(&self, renderer: &mut RenderingEngine) {
-        for (cell, (model, _)) in self.cells.iter().zip(&self.transform_matrices) {
+        for (cell, model) in self.cells.iter().zip(&self.model_matrices) {
             if let Cell::Empty { food, .. } | Cell::Nest { food, .. } = cell {
                 if *food > 0 {
                     let base_y = model.m24 + 0.075 + HEXAGON_RADIUS / 2f32;
@@ -489,8 +609,8 @@ impl Map {
                             vec3(
                                 model.m14 + (rotation * i as f32).cos() * HEXAGON_WIDTH / 4f32,
                                 base_y,
-                                model.m34 + (rotation * i as f32).sin() * HEXAGON_HEIGHT / 4f32
-                            )
+                                model.m34 + (rotation * i as f32).sin() * HEXAGON_HEIGHT / 4f32,
+                            ),
                         )
                     }
                 }

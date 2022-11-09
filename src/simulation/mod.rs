@@ -2,13 +2,15 @@ pub mod ant;
 pub mod instruction;
 pub mod map;
 
-use crate::rendering_engine::{LightSource, Material, RenderingEngine, ResourceHandle, ResourceHandler, ResourceVec};
+use crate::rendering_engine::{
+    LightSource, Material, RenderingEngine, ResourceHandle, ResourceHandler, ResourceVec,
+};
 use crate::simulation::ant::Ant;
 use crate::simulation::instruction::load_instructionset;
 use crate::simulation::map::{AntRef, Cell};
 use instruction::InstructionSet;
 use map::Map;
-use nalgebra_glm::{vec3, TVec3, make_vec3, pi, translate, identity, rotate, vec3_to_vec4};
+use nalgebra_glm::{identity, make_vec3, pi, rotate, translate, vec3, vec3_to_vec4, TVec3};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -18,7 +20,7 @@ const HEXAGON_HEIGHT: f32 = 2_f32 * HEXAGON_RADIUS;
 const HEXAGON_WIDTH: f32 = 1.732050807568 * HEXAGON_RADIUS; // 3_f32.sqrt() * HEXAGON_RADIUS
 
 // Day/night cycle simulation constants
-const MAX_SIMULATION_TIME: u32 = 60*60*24;
+const MAX_SIMULATION_TIME: u32 = 60 * 60 * 24;
 const NOON_THRESHOLD: u32 = MAX_SIMULATION_TIME / 2;
 const EVENING_THRESHOLD: u32 = 2 * MAX_SIMULATION_TIME / 3;
 const NIGHT_THRESHOLD: u32 = 0;
@@ -42,7 +44,6 @@ pub struct Simulation {
     instructions: [InstructionSet; 2],
     in_simulation_time: u32, // MAX 86400, time in seconds per day
     resource_handler: ResourceHandler,
-    tile_model_handle: ResourceHandle,
     ant_model_handle: ResourceHandle,
     food_model_handle: ResourceHandle,
 }
@@ -52,10 +53,14 @@ impl Simulation {
         // Load up resources
         let mut resource_handler = ResourceHandler::default();
         let ant_model = resource_handler.models.load("assets/ant.obj");
-        let hexagon_model = resource_handler.models.load("assets/hexagon.obj");
         let food_model = resource_handler.models.load("assets/food.obj");
+        resource_handler
+            .models
+            .set_colour(&food_model, [0.98039, 0.841176, 0.184314]);
+
         // Then create the actual map
-        let (map, ants) = Map::load_file(map_path);
+        let hexagon_model = resource_handler.models.load("assets/hexagon.obj");
+        let (map, ants) = Map::load_file(map_path, hexagon_model, &resource_handler);
         Self {
             ants,
             map,
@@ -66,7 +71,6 @@ impl Simulation {
             resource_handler,
 
             in_simulation_time: MAX_SIMULATION_TIME / 2,
-            tile_model_handle: hexagon_model,
             ant_model_handle: ant_model,
             food_model_handle: food_model,
         }
@@ -78,9 +82,7 @@ impl Simulation {
         // Each ant moves
         for ant_ref in &self.ants {
             let ant = &mut ant_ref.lock().unwrap();
-            let instruction_set = {
-                &self.instructions[ant.colour.as_index()]
-            };
+            let instruction_set = { &self.instructions[ant.colour.as_index()] };
             ant.process_tick(&mut self.map, instruction_set);
             self.map.cleanup_killed_ants();
         }
@@ -101,14 +103,19 @@ impl Simulation {
     pub fn render(&mut self, interpolation_ratio: f32, renderer: &mut RenderingEngine) {
         renderer.begin();
         self.map
-            .render(renderer, self.tile_model_handle, self.food_model_handle, &self.resource_handler);
+            .render(renderer, self.food_model_handle, &self.resource_handler);
 
         // Render each ant
         for ant_ref in self.ants.iter_mut() {
             let mut ant = &mut ant_ref.lock().unwrap();
 
             ant.interpolate_state(interpolation_ratio);
-            ant.render(renderer, self.ant_model_handle, self.food_model_handle, &self.resource_handler);
+            ant.render(
+                renderer,
+                self.ant_model_handle,
+                self.food_model_handle,
+                &self.resource_handler,
+            );
         }
 
         // Lighting
@@ -130,12 +137,15 @@ impl Simulation {
         };
         let light_angle = pi::<f64>() / MAX_SIMULATION_TIME as f64 * self.in_simulation_time as f64;
         let (offset_x, offset_y) = self.map.size;
-        let (offset_x, offset_y) = (offset_x as f32 / 2f32 * HEXAGON_WIDTH, offset_y as f32 / 2f32 * HEXAGON_HEIGHT);
+        let (offset_x, offset_y) = (
+            offset_x as f32 / 2f32 * HEXAGON_WIDTH,
+            offset_y as f32 / 2f32 * HEXAGON_HEIGHT,
+        );
         let direction = [
             -offset_y + 100f32,
             -100f32 * light_angle.sin() as f32,
             -offset_x - 100f32 * light_angle.cos() as f32,
-            0.0
+            0.0,
         ];
         renderer.add_directional_light(&if self.in_simulation_time < NOON_THRESHOLD {
             // Morning, so we interpolate between NIGHT_LIGHTING and NOON_LIGHTING
@@ -147,7 +157,8 @@ impl Simulation {
             }
         } else if self.in_simulation_time < EVENING_THRESHOLD {
             // Afternoon, so we interpolate between NOON_LIGHTING and EVENING_LIGHTING
-            let evening_light_ratio = (self.in_simulation_time - NOON_THRESHOLD) as f32 / (EVENING_THRESHOLD - NOON_THRESHOLD) as f32;
+            let evening_light_ratio = (self.in_simulation_time - NOON_THRESHOLD) as f32
+                / (EVENING_THRESHOLD - NOON_THRESHOLD) as f32;
             let color = interpolate_lights(EVENING_LIGHTING, NOON_LIGHTING, evening_light_ratio);
             LightSource {
                 vector: direction,
@@ -155,7 +166,8 @@ impl Simulation {
             }
         } else {
             // Night, so we interpolate between EVENING_LIGHTING and NIGHT_LIGHTING
-            let night_light_ratio = (self.in_simulation_time - EVENING_THRESHOLD) as f32 / (MAX_SIMULATION_TIME - EVENING_THRESHOLD) as f32;
+            let night_light_ratio = (self.in_simulation_time - EVENING_THRESHOLD) as f32
+                / (MAX_SIMULATION_TIME - EVENING_THRESHOLD) as f32;
             let color = interpolate_lights(NIGHT_LIGHTING, EVENING_LIGHTING, night_light_ratio);
             LightSource {
                 vector: direction,
@@ -180,18 +192,25 @@ impl Simulation {
     }
 
     // Renders the geometry of a piece of food
-    fn render_food_piece(renderer: &mut RenderingEngine, food_model_handle: ResourceHandle, resource_handler: &ResourceHandler, position: TVec3<f32>, rotation: f32) {
+    fn render_food_piece(
+        renderer: &mut RenderingEngine,
+        food_model_handle: ResourceHandle,
+        resource_handler: &ResourceHandler,
+        position: TVec3<f32>,
+        rotation: f32,
+    ) {
         let mut model_matrix = translate(&identity(), &position);
         model_matrix = rotate(&model_matrix, rotation, &vec3(0f32, 1f32, 0f32));
         renderer.add_model(
-            food_model_handle,
-            &resource_handler,
+            resource_handler
+                .models
+                .fetch_model_vertices(&food_model_handle),
             (model_matrix, model_matrix),
             &Material {
-                colour: [0.98039, 0.841176, 0.184314],
                 shininess: 0.0,
-                specular_intensity: 0.0
-            })
+                specular_intensity: 0.0,
+            },
+        )
     }
     // Renders the light emanating from a piece of food
     fn render_food_light(renderer: &mut RenderingEngine, position: TVec3<f32>) {
@@ -200,7 +219,7 @@ impl Simulation {
         let position = position.data.0[0];
         renderer.add_directional_light(&LightSource {
             color: [0.98039, 0.841176, 0.184314],
-            vector: position
+            vector: position,
         })
     }
 }
