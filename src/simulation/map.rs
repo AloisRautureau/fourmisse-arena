@@ -11,7 +11,115 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::ops::{Index, IndexMut};
 use std::sync::{Arc, Mutex};
+use crate::ecs::{CellType, Colour, Direction, EntityHandler, ExecutionContext, FoodContainer, Markers, Position};
+use crate::resources::ResourceId;
 
+impl Simulation {
+    /// Initializes entities from a given .world file
+    pub fn entities_from_world_file(&mut self, path: &str, instruction_set_ids: (ResourceId, ResourceId)) {
+        let mut f = BufReader::new(File::open(path).expect("could not open file"));
+        let mut buff = Vec::<u8>::new();
+
+        // First read the header
+        f.read_until(b'\n', &mut buff)
+            .expect("could not read from file");
+        buff.clear();
+
+        // Map size (this should be kept in this precise ordering)
+        self.map_width = Self::read_size_from_header(&mut f);
+        self.map_height = Self::read_size_from_header(&mut f);
+
+        // And now the actual map
+        let (mut x, mut y) = (0, 0);
+        while f
+            .read_until(b'\0', &mut buff)
+            .expect("could not read from file")
+            != 0
+        {
+            let s = String::from_utf8(buff)
+                .expect("invalid characters in instruction file");
+
+            for c in s.chars().filter(|e| e != ' ') {
+                if c == '\n' {
+                    x = 0;
+                    y += 1;
+                    continue
+                }
+
+                match c {
+                    '#' => self.add_obstacle_cell(x, y),
+                    '.' => self.add_empty_cell(x, y, 0),
+                    '+' => self.add_nest_cell(x, y, Colour::Red, instruction_set_ids.0),
+                    '-' => self.add_nest_cell(x, y, Colour::Black, instruction_set_ids.1),
+                    _ if c.is_ascii_digit() => self.add_empty_cell(x, y, c.to_digit(10).unwrap()),
+                    _ => ()
+                };
+            }
+
+            buff = s.into_bytes();
+            buff.clear();
+        }
+
+        println!("{}", map.vertices.len() / map.cells.len());
+    }
+
+    fn read_size_from_header(f: &mut BufReader<File>) -> usize {
+        let mut buff = vec!();
+        f.read_until(b'\n', &mut buff)
+            .expect("could not read from file");
+        let s = String::from_utf8(buff).expect("invalid characters in instruction file");
+        s.trim()
+            .parse::<usize>()
+            .expect("size in header is not an integer")
+    }
+
+    fn add_empty_cell(&mut self, x: usize, y: usize, food_units: u32) {
+        let id = self.entities.spawn_entity();
+        self.entities.bind_component(id, Position { x, y });
+        self.entities.bind_component(id, FoodContainer {
+            capacity: u32::MAX,
+            holding: food_units
+        });
+        self.entities.bind_component(id, Markers::default());
+        self.entities.bind_component(id, CellType::Empty)
+    }
+
+    fn add_obstacle_cell(&mut self, x: usize, y: usize) {
+        let id = self.entities.spawn_entity();
+        self.entities.bind_component(id, Position { x, y });
+        self.entities.bind_component(id, CellType::Obstacle)
+    }
+
+    fn add_nest_cell(&mut self, x: usize, y: usize, colour: Colour, instruction_set_id: ResourceId) {
+        // First create the cell
+        let id = self.entities.spawn_entity();
+        self.entities.bind_component(id, Position { x, y });
+        self.entities.bind_component(id, FoodContainer {
+            capacity: u32::MAX,
+            holding: 0
+        });
+        self.entities.bind_component(id, Markers::default());
+        self.entities.bind_component(id, CellType::Nest);
+        self.entities.bind_component(id, colour);
+
+        // Then the corresponding ant
+        let id = self.entities.spawn_entity();
+        self.entities.bind_component(id, Position { x, y });
+        self.entities.bind_component(id, FoodContainer {
+            capacity: 1,
+            holding: 0
+        });
+        self.entities.bind_component(id, colour);
+        self.entities.bind_component(id, ExecutionContext {
+            current_instruction: 0,
+            instruction_set_id,
+            cooldown: 0
+        });
+        self.entities.bind_component(id, Direction::East)
+    }
+}
+
+/*
 pub type AntRef = Arc<Mutex<Ant>>;
 
 #[derive(Clone)]
@@ -760,3 +868,4 @@ impl Debug for Map {
         write!(f, "")
     }
 }
+*/

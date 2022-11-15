@@ -1,6 +1,7 @@
 mod rendering_engine;
 mod simulation;
 mod ecs;
+mod resources;
 
 use crate::rendering_engine::{RenderStage, Vertex};
 use nalgebra_glm::{pi, rotation, vec3, vec4, vec4_to_vec3};

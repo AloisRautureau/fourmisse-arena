@@ -3,7 +3,7 @@ pub mod instruction;
 pub mod map;
 
 use crate::rendering_engine::{
-    LightSource, Material, RenderingEngine, ResourceHandle, ResourceHandler, ResourceVec,
+    LightSource, Material, RenderingEngine,
 };
 use crate::simulation::ant::Colour;
 use crate::simulation::instruction::load_instructionset;
@@ -12,7 +12,10 @@ use instruction::InstructionSet;
 use map::Map;
 use nalgebra_glm::{identity, make_vec3, pi, rotate, translate, vec3, vec3_to_vec4, TVec3};
 pub use map::Pov;
+use crate::ecs::EntityHandler;
+use crate::resources::{InstructionsLoader, ResourceHandler};
 
+/*
 const HEXAGON_RADIUS: f32 = 1_f32;
 const HEXAGON_HEIGHT: f32 = 2_f32 * HEXAGON_RADIUS;
 const HEXAGON_WIDTH: f32 = 1.732050807568 * HEXAGON_RADIUS; // 3_f32.sqrt() * HEXAGON_RADIUS
@@ -33,60 +36,35 @@ const NIGHT_LIGHTING: LightSource = LightSource {
     vector: [0f32; 4],
     color: [0.51373, 0.64706, 0.59608],
 };
+ */
 
-// Represents the current state of a simulation
+/// Represents the current state of a simulation
 pub struct Simulation {
-    pub ants: Vec<AntRef>,
-    pub map: Map,
-    instructions: [InstructionSet; 2],
-    in_simulation_time: u32, // MAX 86400, time in seconds per day
-    resource_handler: ResourceHandler,
-    tile_model_handle: ResourceHandle,
-    red_ant_model_handle: ResourceHandle,
-    black_ant_model_handle: ResourceHandle,
-    food_model_handle: ResourceHandle,
+    entities: EntityHandler,
+    resources: ResourceHandler,
+    map_height: usize,
+    map_width: usize,
 }
 impl Simulation {
-    // Creates a new simulation, loading the needed resources as needed
-    pub fn new(map_path: &str, red_brain_path: &str, black_brain_path: &str) -> Self {
+    /// Initializes a new simulation from the given map and brain files
+    pub fn new(map_path: &str, red_brain_path: &str, black_brain_path: &str) -> Simulation {
         // Load up resources
-        let mut resource_handler = ResourceHandler::default();
-        let red_ant_model = resource_handler.models.load("assets/ant.obj");
-        resource_handler
-            .models
-            .set_colour(&red_ant_model, Colour::Red.rgb());
-        let black_ant_model = resource_handler.models.load("assets/ant.obj");
-        resource_handler
-            .models
-            .set_colour(&black_ant_model, Colour::Black.rgb());
-        let food_model = resource_handler.models.load("assets/food.obj");
-        resource_handler
-            .models
-            .set_colour(&food_model, [0.98039, 0.841176, 0.184314]);
+        let mut resources = ResourceHandler::default();
+        resources.load(&mut InstructionsLoader::new(red_brain_path));
+        resources.load(&mut InstructionsLoader::new(black_brain_path));
 
-        // Then create the actual map
-        let hexagon_model = resource_handler.models.load("assets/hexagon.obj");
+        // Then setup our entities according to the world file
+        let mut entities = EntityHandler::default();
         let (map, ants) = Map::load_file(map_path, hexagon_model, &resource_handler);
-        Self {
-            ants,
-            map,
-            instructions: [
-                load_instructionset(red_brain_path),
-                load_instructionset(black_brain_path),
-            ],
-            resource_handler,
 
-            in_simulation_time: MAX_SIMULATION_TIME / 2,
-            tile_model_handle: hexagon_model,
-            red_ant_model_handle: red_ant_model,
-            black_ant_model_handle: black_ant_model,
-            food_model_handle: food_model,
+        Simulation {
+            entities,
+            resources
         }
     }
 
-    // Each ant executes its current instruction, then
-    // surrounded ants are killed
-    pub fn process_tick(&mut self) {
+    /// Each ant executes its current instruction, from lowest id to highest
+    pub fn update(&mut self) {
         // Each ant moves
         for ant_ref in &self.ants {
             let ant = &mut ant_ref.lock().unwrap();
@@ -101,11 +79,12 @@ impl Simulation {
         self.in_simulation_time = (self.in_simulation_time + 1) % MAX_SIMULATION_TIME;
     }
 
-    // Returns the current food units in each nest
-    pub fn score(&self) -> (u32, u32) {
+    /// Returns the current food units in each nest
+    pub fn points(&self) -> (u32, u32) {
         self.map.score()
     }
 
+    /*
     // Renders the next frame of the simulation, given an interpolation ratio
     // to avoid stuttering
     pub fn render(&mut self, interpolation_ratio: f32, pov: Pov, renderer: &mut RenderingEngine) {
@@ -231,4 +210,5 @@ impl Simulation {
             vector: position,
         })
     }
+     */
 }

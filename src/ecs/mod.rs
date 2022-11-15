@@ -6,6 +6,10 @@ use crate::ecs::entity::{EntityId, EntityInfo};
 mod component;
 mod archetype;
 mod entity;
+mod query;
+mod components_impl;
+
+pub use components_impl::*;
 
 /// Structure responsible for storing, modifying, and generally managing entities
 #[derive(Default)]
