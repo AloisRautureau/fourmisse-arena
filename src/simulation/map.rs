@@ -1,22 +1,19 @@
-use super::ant::{Ant, Colour};
-use std::cmp::min;
-use std::fmt::{Debug, Formatter};
-
+/*
 use crate::rendering_engine::{Material, RenderingEngine, ResourceHandle, ResourceHandler};
 use crate::simulation::instruction::Cond;
 use crate::simulation::{Simulation, HEXAGON_HEIGHT, HEXAGON_RADIUS, HEXAGON_WIDTH};
 use crate::Vertex;
 use nalgebra_glm::{identity, pi, translate, vec3, TMat4};
+ */
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::ops::{Index, IndexMut};
-use std::sync::{Arc, Mutex};
-use crate::ecs::{CellType, Colour, Direction, EntityHandler, ExecutionContext, FoodContainer, Markers, Position};
+use crate::ecs::{CellType, Colour, Direction, ExecutionContext, FoodContainer, Markers, Position};
 use crate::resources::ResourceId;
+use crate::simulation::Simulation;
 
 impl Simulation {
     /// Initializes entities from a given .world file
-    pub fn entities_from_world_file(&mut self, path: &str, instruction_set_ids: (ResourceId, ResourceId)) {
+    pub fn entities_from_world_file(&mut self, path: &str, red_instruction_set: ResourceId, black_instruction_set: ResourceId) {
         let mut f = BufReader::new(File::open(path).expect("could not open file"));
         let mut buff = Vec::<u8>::new();
 
@@ -39,7 +36,7 @@ impl Simulation {
             let s = String::from_utf8(buff)
                 .expect("invalid characters in instruction file");
 
-            for c in s.chars().filter(|e| e != ' ') {
+            for c in s.chars().filter(|e| *e != ' ') {
                 if c == '\n' {
                     x = 0;
                     y += 1;
@@ -49,18 +46,18 @@ impl Simulation {
                 match c {
                     '#' => self.add_obstacle_cell(x, y),
                     '.' => self.add_empty_cell(x, y, 0),
-                    '+' => self.add_nest_cell(x, y, Colour::Red, instruction_set_ids.0),
-                    '-' => self.add_nest_cell(x, y, Colour::Black, instruction_set_ids.1),
+                    '+' => self.add_nest_cell(x, y, Colour::Red, red_instruction_set),
+                    '-' => self.add_nest_cell(x, y, Colour::Black, black_instruction_set),
                     _ if c.is_ascii_digit() => self.add_empty_cell(x, y, c.to_digit(10).unwrap()),
                     _ => ()
                 };
+
+                x += 1
             }
 
             buff = s.into_bytes();
             buff.clear();
         }
-
-        println!("{}", map.vertices.len() / map.cells.len());
     }
 
     fn read_size_from_header(f: &mut BufReader<File>) -> usize {
@@ -76,12 +73,12 @@ impl Simulation {
     fn add_empty_cell(&mut self, x: usize, y: usize, food_units: u32) {
         let id = self.entities.spawn_entity();
         self.entities.bind_component(id, Position { x, y });
+        self.entities.bind_component(id, CellType::Empty);
         self.entities.bind_component(id, FoodContainer {
             capacity: u32::MAX,
             holding: food_units
         });
         self.entities.bind_component(id, Markers::default());
-        self.entities.bind_component(id, CellType::Empty)
     }
 
     fn add_obstacle_cell(&mut self, x: usize, y: usize) {
@@ -94,12 +91,12 @@ impl Simulation {
         // First create the cell
         let id = self.entities.spawn_entity();
         self.entities.bind_component(id, Position { x, y });
+        self.entities.bind_component(id, CellType::Nest);
         self.entities.bind_component(id, FoodContainer {
             capacity: u32::MAX,
             holding: 0
         });
         self.entities.bind_component(id, Markers::default());
-        self.entities.bind_component(id, CellType::Nest);
         self.entities.bind_component(id, colour);
 
         // Then the corresponding ant

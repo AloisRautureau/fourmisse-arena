@@ -21,3 +21,11 @@ vulkano-shaders = "0.31.0"
 bytemuck = "1.12.1"
 bytemuck_derive = "1.2.1"
 nalgebra-glm = "0.17.0"
+
+# Other
+rustc-hash = "1.1.0"
+
+[profile.release]
+opt-level = 2
+debug = true
+panic = "abort"

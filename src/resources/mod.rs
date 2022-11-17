@@ -1,5 +1,5 @@
 mod instructions_loader;
-pub use instructions_loader::InstructionsLoader;
+pub use instructions_loader::*;
 
 use std::any::Any;
 use std::collections::HashMap;

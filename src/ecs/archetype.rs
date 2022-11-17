@@ -1,6 +1,8 @@
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::any::Any;
+use std::fmt::{Debug, Formatter};
+use rustc_hash::FxHashMap;
 use crate::ecs::component::ComponentId;
+use crate::ecs::entity::EntityId;
 
 pub type ArchetypeId = usize;
 pub type Signature = Vec<ComponentId>;
@@ -21,6 +23,7 @@ fn xor_signature(signature: &Signature, component_id: ComponentId) -> Signature 
 }
 
 /// Stores every archetype that was ever created
+#[derive(Debug)]
 pub struct ArchetypeRegister {
     archetypes: Vec<Box<Archetype>>
 }
@@ -55,7 +58,7 @@ impl ArchetypeRegister {
     /// Registers a new archetype created by adding/removing a component from another, known, archetype
     /// This returns a mutable reference for convenience, as the EntityHandler needs to perform a
     /// few modifications on the resulting archetype afterwards
-    pub fn extend_archetype(&mut self, src_archetype_id: ArchetypeId, component_id: ComponentId) -> &mut Box<Archetype> {
+    pub fn extend_archetype(&mut self, src_archetype_id: ArchetypeId, component_id: ComponentId) -> ArchetypeId {
         let next_archetype_id = {
             let src_archetype = self.get(src_archetype_id);
             src_archetype.next_archetype(component_id)
@@ -87,7 +90,7 @@ impl ArchetypeRegister {
             }
         };
 
-        self.get_mut(dest_archetype_id)
+        dest_archetype_id
     }
 
     /// Looks up an archetype matching the given signature
@@ -110,11 +113,6 @@ impl ArchetypeRegister {
         }
         Some(current)
     }
-
-    /// Returns a reference to any archetype matching the query
-    pub fn query(&self, query: ()) -> Vec<&Archetype> {
-        todo!()
-    }
 }
 
 /// This structure defines signatures for entities, as a set of components (additive typing)
@@ -125,18 +123,22 @@ pub struct Archetype {
     pub id: ArchetypeId,
     pub signature: Signature,
 
-    pub components: Vec<Vec<Box<dyn Any>>>,
-    edges: HashMap<ComponentId, ArchetypeId>,
+    pub entity_ids: Vec<EntityId>,
+    components: Vec<Vec<Box<dyn Any>>>,
+    edges: FxHashMap<ComponentId, ArchetypeId>,
 }
 impl Archetype {
     /// Returns the index of a new row in the components table
-    pub fn push_row(&mut self, row: Vec<Box<dyn Any>>) -> usize {
+    pub fn push_row(&mut self, entity: EntityId, row: Vec<Box<dyn Any>>) -> usize {
         self.components.push(row);
+        self.entity_ids.push(entity);
         self.components.len() - 1
     }
-    /// Removes the row at the given index, returning the removed row
-    pub fn remove_row(&mut self, row_index: usize) -> Vec<Box<dyn Any>> {
-        self.components.remove(row_index)
+    /// Removes the row at the given index, returning the removed row as well as a vector of
+    /// entities for which the row_index attribute should be decreased
+    pub fn remove_row(&mut self, row_index: usize) -> (Vec<Box<dyn Any>>, Vec<&EntityId>) {
+        self.entity_ids.remove(row_index);
+        (self.components.remove(row_index), self.entity_ids.iter().skip(row_index).collect())
     }
 
     /// Checks if the archetype is composed of a certain component type
@@ -157,15 +159,20 @@ impl Archetype {
     /// Returns a reference to a component stored at the given column and row, casting it to a certain type
     /// Note that this function panics if ComponentType does not match the actual type of the stored component
     pub fn component<ComponentType: 'static>(&self, column: usize, row: usize) -> &ComponentType {
-        self.components[column][row].downcast_ref::<ComponentType>().unwrap()
+        self.components[row][column].downcast_ref::<ComponentType>().unwrap()
     }
     pub fn component_mut<ComponentType: 'static>(&mut self, column: usize, row: usize) -> &mut ComponentType {
-        self.components[column][row].downcast_mut::<ComponentType>().unwrap()
+        self.components[row][column].downcast_mut::<ComponentType>().unwrap()
     }
 
     /// Sets the value of the given column/row
     pub fn set_component<ComponentType: 'static>(&mut self, component: ComponentType, column: usize, row: usize) {
-        self.components[column][row] = Box::new(component);
+        self.components[row][column] = Box::new(component);
+    }
+}
+impl Debug for Archetype {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {{ signature: {:?}, edges: {:?} }}", self.id, self.signature, self.edges)
     }
 }
 
@@ -190,8 +197,8 @@ mod tests {
     #[test]
     fn extend_archetype() {
         let mut archetype_register = ArchetypeRegister::default();
-        let a1 = archetype_register.extend_archetype(0, 0).id;
-        let a2 = archetype_register.extend_archetype(a1, 2).id;
+        let a1 = archetype_register.extend_archetype(0, 0);
+        let a2 = archetype_register.extend_archetype(a1, 2);
 
         assert_eq!(archetype_register.get(a1).next_archetype(2), Some(a2));
         assert_eq!(archetype_register.get(a1).next_archetype(0), Some(0));

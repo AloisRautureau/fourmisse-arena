@@ -1,5 +1,5 @@
 use clap::Parser;
-use fourmisse_arena::{get_average_score, run, run_gui};
+use fourmisse_arena::{get_average_score, run};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -28,7 +28,7 @@ fn main() {
 
     if args.gui {
         // Launch a game inside the GUI takes priority
-        run_gui(args.world, (red_brain_path, black_brain_path), args.ticks)
+        //run_gui(args.world, (red_brain_path, black_brain_path), args.ticks)
     } else if let Some(games) = args.games {
         // We get an average score over a set number of games
         get_average_score(

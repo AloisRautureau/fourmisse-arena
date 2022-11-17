@@ -1,4 +1,3 @@
-use std::cmp::max;
 use crate::resources::ResourceLoader;
 use regex::Regex;
 use std::collections::HashMap;
@@ -91,6 +90,9 @@ pub enum Instruction {
     Move(Label),
     Flip(u8, Label, Label),
     Goto(Label),
+
+    // This instruction is used to replace invalid instructions that are parsed (Mark/Unmark with i > 5 for example)
+    Dummy
 }
 impl From<(String, &HashMap<String, usize>)> for Instruction {
     fn from((instr, label_map): (String, &HashMap<String, usize>)) -> Self {
@@ -136,7 +138,11 @@ impl From<(String, &HashMap<String, usize>)> for Instruction {
                     .expect("Missing argument on Mark instruction")
                     .parse::<u8>()
                     .expect("Argument on Mark instruction is not an integer");
-                Instruction::Mark(max(i, 6))
+                if i < 6 {
+                    Instruction::Mark(i)
+                } else {
+                    Instruction::Dummy
+                }
             }
             "Unmark" => {
                 let i = instruction_parts
@@ -144,7 +150,11 @@ impl From<(String, &HashMap<String, usize>)> for Instruction {
                     .expect("Missing argument on Unmark instruction")
                     .parse::<u8>()
                     .expect("Argument on Unmark instruction is not an integer");
-                Instruction::Unmark(max(i, 6))
+                if i < 6 {
+                    Instruction::Unmark(i)
+                } else {
+                    Instruction::Dummy
+                }
             }
             "PickUp" => {
                 let label = label_map
@@ -198,16 +208,15 @@ impl From<(String, &HashMap<String, usize>)> for Instruction {
                 Instruction::Flip(p, *label1, *label2)
             }
             "Goto" => {
+                let label_name = instruction_parts.next().expect("Missing argument on Goto instruction");
                 let label = label_map
                     .get(
-                        instruction_parts
-                            .next()
-                            .expect("Missing argument on Goto instruction"),
+                        label_name
                     )
-                    .expect("Use of an undefined label in Goto instruction");
+                    .unwrap_or_else(|| panic!("Use of undefined label {} in Goto instruction", label_name));
                 Instruction::Goto(*label)
             }
-            _ => panic!("Invalid instruction"),
+            _ => panic!("{} is not a valid instruction", instr),
         }
     }
 }
@@ -241,7 +250,7 @@ impl ResourceLoader for InstructionsLoader {
             Ok(BufReader::new(file).lines())
         }
 
-        let lines = read_lines(&self.0)
+        let lines = read_lines(&self.path)
             .expect("Could not read the given .brain file")
             .filter_map(|l| {
                 if let Ok(s) = l {
@@ -275,7 +284,7 @@ impl ResourceLoader for InstructionsLoader {
         }
         // We can then do a second pass, this time taking care of the
         // actual instructions
-        let lines = read_lines(path).expect("Could not read the given .brain file");
+        let lines = read_lines(&self.path).expect("Could not read the given .brain file");
         let mut instructions: InstructionSet = vec![];
         for line in lines.flatten() {
             // The line is either an instruction or a label

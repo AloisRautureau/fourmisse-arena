@@ -1,11 +1,9 @@
-mod rendering_engine;
+//mod rendering_engine;
 mod simulation;
 mod ecs;
 mod resources;
 
-use crate::rendering_engine::{RenderStage, Vertex};
 use nalgebra_glm::{pi, rotation, vec3, vec4, vec4_to_vec3};
-use rendering_engine::RenderingEngine;
 use simulation::Simulation;
 use std::cmp::Ordering;
 use std::time::Instant;
@@ -13,10 +11,9 @@ use winit::dpi::PhysicalPosition;
 use winit::event::KeyboardInput;
 use winit::event::{DeviceEvent, ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use crate::simulation::Pov;
 
 const DEFAULT_TICKS: usize = 100000;
-
+/*
 pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
     // Initial setup
     let event_loop = EventLoop::new();
@@ -138,17 +135,20 @@ pub fn run_gui(world: String, brains: (String, String), ticks: Option<usize>) {
         _ => {}
     })
 }
+ */
 
 // Runs one game given a world, brains files, as well as the number of ticks per game
 // (defaulting to DEFAULT_TICKS)
 pub fn run(world: String, brains: (String, String), ticks: Option<usize>) {
     let mut simulation = Simulation::new(&world, &brains.0, &brains.1);
 
+    println!("{:?}", simulation.points());
+
     for _ in 0..ticks.unwrap_or(DEFAULT_TICKS) {
-        simulation.process_tick()
+        simulation.update()
     }
 
-    let (red_points, black_points) = simulation.score();
+    let (red_points, black_points) = simulation.points();
     match red_points.cmp(&black_points) {
         Ordering::Greater => println!(
             "Red ants won with {} against {} for black ants",
@@ -182,10 +182,10 @@ pub fn get_average_score(
         );
 
         for _ in 0..ticks.unwrap_or(DEFAULT_TICKS) {
-            simulation.process_tick()
+            simulation.update()
         }
 
-        let (red_points, black_points) = simulation.score();
+        let (red_points, black_points) = simulation.points();
         if g % 2 == 0 {
             total_score_red.0 += red_points;
             total_score_black.1 += black_points;

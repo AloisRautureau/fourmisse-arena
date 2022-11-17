@@ -1,19 +1,11 @@
-pub mod ant;
-pub mod instruction;
+pub mod interpreter;
 pub mod map;
 
-use crate::rendering_engine::{
-    LightSource, Material, RenderingEngine,
-};
-use crate::simulation::ant::Colour;
-use crate::simulation::instruction::load_instructionset;
-use crate::simulation::map::AntRef;
-use instruction::InstructionSet;
-use map::Map;
-use nalgebra_glm::{identity, make_vec3, pi, rotate, translate, vec3, vec3_to_vec4, TVec3};
-pub use map::Pov;
-use crate::ecs::EntityHandler;
-use crate::resources::{InstructionsLoader, ResourceHandler};
+use vulkano::shader::spirv::Decoration::Component;
+use crate::ecs::{CellType, Colour, EntityHandler, FoodContainer, Position};
+use crate::ecs::ExecutionContext;
+use crate::query;
+use crate::resources::{InstructionSet, InstructionsLoader, ResourceHandler};
 
 /*
 const HEXAGON_RADIUS: f32 = 1_f32;
@@ -39,6 +31,7 @@ const NIGHT_LIGHTING: LightSource = LightSource {
  */
 
 /// Represents the current state of a simulation
+#[derive(Default)]
 pub struct Simulation {
     entities: EntityHandler,
     resources: ResourceHandler,
@@ -48,40 +41,51 @@ pub struct Simulation {
 impl Simulation {
     /// Initializes a new simulation from the given map and brain files
     pub fn new(map_path: &str, red_brain_path: &str, black_brain_path: &str) -> Simulation {
+        let mut sim = Simulation::default();
+
         // Load up resources
-        let mut resources = ResourceHandler::default();
-        resources.load(&mut InstructionsLoader::new(red_brain_path));
-        resources.load(&mut InstructionsLoader::new(black_brain_path));
+        let red_instruction_set = sim.resources.load(&mut InstructionsLoader::new(red_brain_path));
+        let black_instruction_set = sim.resources.load(&mut InstructionsLoader::new(black_brain_path));
 
         // Then setup our entities according to the world file
-        let mut entities = EntityHandler::default();
-        let (map, ants) = Map::load_file(map_path, hexagon_model, &resource_handler);
+        sim.entities_from_world_file(map_path, red_instruction_set, black_instruction_set);
 
-        Simulation {
-            entities,
-            resources
-        }
+        sim
     }
 
     /// Each ant executes its current instruction, from lowest id to highest
     pub fn update(&mut self) {
-        // Each ant moves
-        for ant_ref in &self.ants {
-            let ant = &mut ant_ref.lock().unwrap();
-            let instruction_set = { &self.instructions[ant.colour.as_index()] };
-            ant.process_tick(&mut self.map, instruction_set);
-            self.map.cleanup_killed_ants();
+        let ants = { self.entities.query(&query!(&self.entities, ExecutionContext)) };
+        for ant in ants {
+            // We first fetch the ant's current instruction
+            let current_instruction = {
+                let exec_context = self.entities.component_mut::<ExecutionContext>(ant).unwrap();
+                if exec_context.cooldown > 0 {
+                    exec_context.cooldown -= 1;
+                    continue
+                } else {
+                    let instruction_set = self.resources.get::<InstructionSet>(exec_context.instruction_set_id);
+                    instruction_set[exec_context.current_instruction]
+                }
+            };
+
+            // Then execute it
+            self.execute_instruction(ant, &current_instruction);
         }
-
-        // We only need to keep ants that appear on the map, so we recreate our ants vector
-        self.ants = self.map.ants();
-
-        self.in_simulation_time = (self.in_simulation_time + 1) % MAX_SIMULATION_TIME;
     }
 
     /// Returns the current food units in each nest
     pub fn points(&self) -> (u32, u32) {
-        self.map.score()
+        let (mut red_points, mut black_points) = (0, 0);
+        for nest_cell in self.entities.query(&query!(&self.entities, CellType, Colour, FoodContainer)) {
+            let food_units = self.entities.component::<FoodContainer>(nest_cell).unwrap().holding;
+            if self.entities.component::<Colour>(nest_cell).unwrap() == &Colour::Red {
+                red_points += food_units
+            } else {
+                black_points += food_units
+            }
+        }
+        (red_points, black_points)
     }
 
     /*
